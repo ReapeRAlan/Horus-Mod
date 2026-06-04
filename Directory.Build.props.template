@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project>
+  <!-- 
+    Copy this file to Directory.Build.props and adjust the NuclearOptionDir path 
+    to match your local installation. Do not commit Directory.Build.props to source control.
+  -->
+  <PropertyGroup>
+    <NuclearOptionDir>..\</NuclearOptionDir>
+  </PropertyGroup>
+</Project>
