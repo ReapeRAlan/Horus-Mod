@@ -58,7 +58,7 @@
   </ItemGroup>
 
   <Target Name="PostBuild" AfterTargets="PostBuildEvent">
-    <Exec Command="mkdir &quot;$(NuclearOptionDir)\BepInEx\plugins\HorusMod&quot; 2&gt;nul || exit 0&#xD;&#xA;copy /Y &quot;$(TargetDir)$(TargetName).dll&quot; &quot;$(NuclearOptionDir)\BepInEx\plugins\HorusMod\&quot;" />
+    <Exec Command="if not exist &quot;$(ProjectDir)..\BepInEx\plugins\HorusMod&quot; mkdir &quot;$(ProjectDir)..\BepInEx\plugins\HorusMod&quot;&#xD;&#xA;copy /Y &quot;$(TargetPath)&quot; &quot;$(ProjectDir)..\BepInEx\plugins\HorusMod\$(TargetFileName)&quot;" />
   </Target>
 
 </Project>
