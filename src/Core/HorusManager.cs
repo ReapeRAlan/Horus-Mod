@@ -4,6 +4,8 @@ using System.Collections.Generic;
 using UnityEngine;
 using NuclearOption.Networking;
 using Mirage;
+using HorusMod.Networking;
+using HorusMod.Placement;
 
 namespace HorusMod.Core
 {
@@ -27,7 +29,36 @@ namespace HorusMod.Core
         private bool isMouseOverGUI = false;
         private bool mapSpawnMode = false;
         private bool mapOpenedByHorus = false;
+        private bool mapGhostNoticeLogged = false;
         private bool snapToGround = true;
+        private bool alignToSurface = false;
+        private Vector3 lastSurfaceNormal = Vector3.up;
+
+        // Ghost preview (local-only, non-networked)
+        private readonly GhostPreview ghost = new GhostPreview();
+        private bool ghostPreviewEnabled = true;
+        private UnitDefinition ghostBuildFailedDef;
+
+        // Units spawned by Horus this session (for safe deletion)
+        private readonly HashSet<Unit> horusSpawnedUnits = new HashSet<Unit>();
+        private bool scrollAxisAvailable = true;
+
+        // Grid snapping
+        private bool gridSnapEnabled = false;
+        private float gridSize = 10f;
+        private static readonly float[] gridSizeOptions = { 1f, 5f, 10f, 25f, 50f, 100f };
+        private string gridSizeInputText = "10";
+
+        // Rotation snapping
+        private bool rotationSnapEnabled = false;
+        private float rotationSnapStep = 15f;
+        private static readonly float[] rotationSnapOptions = { 1f, 5f, 15f, 45f, 90f };
+
+        // UI section foldouts
+        private bool showPlacementTools = true;
+        private bool showMapTools = true;
+        private bool showControls = false;
+        private Vector2 mainScroll;
 
         private Vector2 scrollPosition;
 
@@ -41,6 +72,7 @@ namespace HorusMod.Core
         private void Awake()
         {
             Instance = this;
+            ghostPreviewEnabled = HorusPlugin.EnableGhostPreview.Value;
             HorusPlugin.Logger.LogInfo("HorusManager created.");
         }
 
@@ -54,38 +86,34 @@ namespace HorusMod.Core
 
             if (!horusActive) return;
 
+            // If the mission ended while active, tear down the preview safely.
+            if (!HorusPermissions.InMission())
+            {
+                ghost.Clear();
+                horusSpawnedUnits.Clear();
+                return;
+            }
+
             if (Input.GetKeyDown(HorusPlugin.HotkeyToggleUI.Value))
             {
                 hideGUI = !hideGUI;
             }
 
-            // Handle scroll wheel modifiers for altitude and rotation
-            float scroll = Input.GetAxis("Mouse ScrollWheel");
-            if (scroll != 0f && !isMouseOverGUI)
-            {
-                float multiplier = Input.GetKey(KeyCode.LeftShift) ? 5f : 1f;
+            bool mapOpen = mapSpawnMode && DynamicMap.mapMaximized;
 
-                if (Input.GetKey(KeyCode.LeftControl))
-                {
-                    // Ctrl + Scroll = altitude
-                    spawnAltitude += scroll * HorusPlugin.AltitudeStep.Value * multiplier * 10f;
-                    spawnAltitude = Mathf.Clamp(spawnAltitude, 0f, 50000f);
-                    spawnAltitude = Mathf.Round(spawnAltitude);
-                    altitudeInputText = spawnAltitude.ToString("0");
-                }
-                else if (Input.GetKey(KeyCode.LeftAlt))
-                {
-                    // Alt + Scroll = yaw rotation
-                    spawnYaw += scroll * HorusPlugin.RotationStep.Value * multiplier * 10f;
-                    spawnYaw = spawnYaw % 360f;
-                    if (spawnYaw < 0f) spawnYaw += 360f;
-                    yawInputText = spawnYaw.ToString("0");
-                }
-            }
+            // Read placement scroll shortcuts FIRST, before anything could consume the delta.
+            HandleScrollShortcuts(mapOpen);
 
-            // Map spawn mode: when map is open and Horus is active, left click spawns at map cursor
-            if (mapSpawnMode && DynamicMap.mapMaximized)
+            if (mapOpen)
             {
+                // The map is a fullscreen overlay, so the world ghost is not shown here.
+                ghost.SetVisible(false);
+                if (!mapGhostNoticeLogged)
+                {
+                    HorusPlugin.Logger.LogInfo("Ghost preview is hidden while the map is open; the unit spawns at the map cursor on click.");
+                    mapGhostNoticeLogged = true;
+                }
+
                 // Only spawn when clicking on the map itself, not over the Horus window
                 if (Input.GetMouseButtonDown(0) && !isMouseOverGUI)
                 {
@@ -93,6 +121,8 @@ namespace HorusMod.Core
                 }
                 return; // Don't process camera/world input while map is open
             }
+
+            mapGhostNoticeLogged = false;
 
             // If the map was closed (e.g. user pressed M), leave map spawn mode
             if (mapSpawnMode && !DynamicMap.mapMaximized)
@@ -105,6 +135,7 @@ namespace HorusMod.Core
             if (!isMouseOverGUI)
             {
                 ManageCameraAndInput();
+                UpdateGhost();
 
                 if (Input.GetMouseButtonDown(0))
                 {
@@ -118,6 +149,7 @@ namespace HorusMod.Core
             }
             else
             {
+                // Mouse over the Horus window: keep the last ghost visible but don't move it.
                 if (Input.GetMouseButton(1))
                 {
                     Cursor.lockState = CursorLockMode.Locked;
@@ -129,6 +161,77 @@ namespace HorusMod.Core
                     Cursor.visible = true;
                 }
             }
+        }
+
+        /// <summary>
+        /// Reads mouse-wheel placement shortcuts. Reads the wheel via the game's own Rewired
+        /// "Zoom View" axis first (reliable here even when Input.mouseScrollDelta reports 0), runs
+        /// before any code that could reset input axes, and never fights the free camera (its zoom
+        /// is suppressed by the Harmony patch while Horus is active).
+        /// Ctrl = altitude, Alt = yaw, Shift = larger step. No modifier leaves placement untouched.
+        /// </summary>
+        private void HandleScrollShortcuts(bool mapOpen)
+        {
+            // Over the Horus window: let GUI scroll views use the wheel.
+            if (isMouseOverGUI) return;
+
+            // While the map is open, only act if allowed (the map also zooms with the wheel).
+            if (mapOpen && !HorusPlugin.AllowScrollWhileMapOpen.Value) return;
+
+            float scroll = ReadScrollDelta();
+            if (Mathf.Approximately(scroll, 0f)) return;
+
+            bool ctrl = Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl);
+            bool alt = Input.GetKey(KeyCode.LeftAlt) || Input.GetKey(KeyCode.RightAlt);
+            bool shift = Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift);
+
+            if (!ctrl && !alt) return; // plain scroll should not change placement
+
+            float dir = scroll > 0f ? 1f : -1f;
+
+            if (ctrl)
+            {
+                float step = shift ? HorusPlugin.AltitudeStepLarge.Value : HorusPlugin.AltitudeStep.Value;
+                spawnAltitude = Mathf.Clamp(Mathf.Round(spawnAltitude + dir * step), 0f, 50000f);
+                altitudeInputText = spawnAltitude.ToString("0");
+                HorusPlugin.Logger.LogInfo($"Horus scroll: altitude -> {spawnAltitude:F0} m");
+            }
+            else // alt
+            {
+                float step = shift ? HorusPlugin.RotationStepLarge.Value : HorusPlugin.RotationStep.Value;
+                spawnYaw = ApplyRotationSnap(NormalizeAngle(spawnYaw + dir * step));
+                yawInputText = spawnYaw.ToString("0");
+                HorusPlugin.Logger.LogInfo($"Horus scroll: yaw -> {spawnYaw:F0} deg");
+            }
+        }
+
+        /// <summary>
+        /// Robust mouse-wheel reader. Primary source is the game's Rewired "Zoom View" axis (the
+        /// mouse wheel in this game); falls back to Unity's mouseScrollDelta and the legacy axis.
+        /// </summary>
+        private float ReadScrollDelta()
+        {
+            float scroll = 0f;
+
+            if (GameManager.playerInput != null)
+            {
+                try { scroll = GameManager.playerInput.GetAxis("Zoom View"); }
+                catch { /* action not present; fall through to Unity input */ }
+            }
+
+            if (Mathf.Approximately(scroll, 0f))
+            {
+                scroll = Input.mouseScrollDelta.y;
+            }
+
+            if (Mathf.Approximately(scroll, 0f) && scrollAxisAvailable)
+            {
+                try { scroll = Input.GetAxis("Mouse ScrollWheel"); }
+                catch { scrollAxisAvailable = false; }
+            }
+
+            if (HorusPlugin.InvertScrollDirection.Value) scroll = -scroll;
+            return scroll;
         }
 
         private void ManageCameraAndInput()
@@ -216,6 +319,10 @@ namespace HorusMod.Core
 
             horusActive = !horusActive;
             ExitMapSpawnMode();
+            if (!horusActive)
+            {
+                ghost.Clear();
+            }
             HorusPlugin.Logger.LogInfo($"Horus Mode toggled: {horusActive}");
             
             if (horusActive && CameraStateManager.i != null)
@@ -289,11 +396,6 @@ namespace HorusMod.Core
             Vector2 mouseScreenPos = new Vector2(Input.mousePosition.x, Screen.height - Input.mousePosition.y);
             isMouseOverGUI = windowRect.Contains(mouseScreenPos);
 
-            if (isMouseOverGUI)
-            {
-                Input.ResetInputAxes();
-            }
-
             if (mapSpawnMode && DynamicMap.mapMaximized)
             {
                 DrawMapSpawnOverlay();
@@ -328,6 +430,8 @@ namespace HorusMod.Core
 
         private void DrawHorusWindow(int windowID)
         {
+            mainScroll = GUILayout.BeginScrollView(mainScroll);
+
             if (GameManager.gameState != GameState.SinglePlayer && GameManager.gameState != GameState.Multiplayer)
             {
                 GUILayout.Label("Status: Not in mission (Game State is " + GameManager.gameState + ")");
@@ -336,8 +440,19 @@ namespace HorusMod.Core
             if (Encyclopedia.i == null)
             {
                 GUILayout.Label("Error: Encyclopedia not loaded yet.");
+                GUILayout.EndScrollView();
                 GUI.DragWindow();
                 return;
+            }
+
+            // --- Permission / mode status ---
+            GUILayout.Label("Mode: " + HorusPermissions.GetModeLabel());
+            if (HorusPermissions.IsMultiplayerClient())
+            {
+                Color prev = GUI.color;
+                GUI.color = new Color(1f, 0.5f, 0.5f);
+                GUILayout.Label("Permission: host permission required. Spawning disabled.");
+                GUI.color = prev;
             }
 
             // --- Faction Selection ---
@@ -386,7 +501,7 @@ namespace HorusMod.Core
             }
             GUILayout.EndScrollView();
 
-            // --- Altitude Controls ---
+            // --- Placement values ---
             GUILayout.Space(5);
             GUILayout.Label($"Altitude: {spawnAltitude:F0} m  |  Yaw: {spawnYaw:F0}°");
 
@@ -398,7 +513,7 @@ namespace HorusMod.Core
                 altitudeInputText = spawnAltitude.ToString("0");
             }
 
-            // Custom altitude input
+            // Custom altitude / yaw input
             GUILayout.BeginHorizontal();
             GUILayout.Label("Alt:", GUILayout.Width(30));
             altitudeInputText = GUILayout.TextField(altitudeInputText, GUILayout.Width(70));
@@ -416,8 +531,7 @@ namespace HorusMod.Core
             {
                 if (float.TryParse(yawInputText, out float parsed))
                 {
-                    spawnYaw = parsed % 360f;
-                    if (spawnYaw < 0f) spawnYaw += 360f;
+                    spawnYaw = ApplyRotationSnap(NormalizeAngle(parsed));
                     yawInputText = spawnYaw.ToString("0");
                 }
             }
@@ -437,7 +551,7 @@ namespace HorusMod.Core
             float newYaw = GUILayout.HorizontalSlider(spawnYaw, 0f, 360f);
             if (Mathf.Abs(newYaw - spawnYaw) > 0.01f)
             {
-                spawnYaw = Mathf.Round(newYaw / 5f) * 5f;
+                spawnYaw = ApplyRotationSnap(newYaw);
                 yawInputText = spawnYaw.ToString("0");
             }
 
@@ -457,36 +571,121 @@ namespace HorusMod.Core
                 spawnAltitude = 0f;
                 altitudeInputText = "0";
             }
-            if (GUILayout.Button("Reset Rotation"))
+            if (GUILayout.Button("Reset Yaw"))
             {
                 spawnYaw = 0f;
                 yawInputText = "0";
             }
             GUILayout.EndHorizontal();
 
-            // --- Map Spawn Mode ---
+            // --- Placement Tools (preview / snapping) ---
             GUILayout.Space(5);
-            string mapBtnLabel = mapSpawnMode ? "■ Map Spawn: ON" : "▶ Map Spawn: OFF";
-            if (GUILayout.Button(mapBtnLabel))
+            if (Section("Placement Tools", ref showPlacementTools))
             {
-                if (mapSpawnMode) ExitMapSpawnMode();
-                else EnterMapSpawnMode();
-            }
-            if (mapSpawnMode)
-            {
-                GUILayout.Label("Left-click the map to spawn at the cursor.");
-                GUILayout.Label("Press M to open/close the map.");
-            }
-            snapToGround = GUILayout.Toggle(snapToGround, " Snap ground units to terrain");
+                ghostPreviewEnabled = GUILayout.Toggle(ghostPreviewEnabled, " Ghost Preview");
+                snapToGround = GUILayout.Toggle(snapToGround, " Snap to Ground (ground units on terrain)");
+                alignToSurface = GUILayout.Toggle(alignToSurface, " Align to Surface Normal (experimental)");
 
-            // --- Controls Legend ---
+                // Grid snapping
+                GUILayout.Space(3);
+                gridSnapEnabled = GUILayout.Toggle(gridSnapEnabled, " Grid Snap (aligns position to spacing)");
+                if (gridSnapEnabled)
+                {
+                    GUILayout.Label("Grid size:");
+                    int gi = IndexOf(gridSizeOptions, gridSize);
+                    string[] gridLabels = { "1m", "5m", "10m", "25m", "50m", "100m" };
+                    int newGi = GUILayout.SelectionGrid(gi < 0 ? 2 : gi, gridLabels, 3);
+                    if (newGi != gi && newGi >= 0 && newGi < gridSizeOptions.Length)
+                    {
+                        gridSize = gridSizeOptions[newGi];
+                        gridSizeInputText = gridSize.ToString("0");
+                    }
+                    GUILayout.BeginHorizontal();
+                    GUILayout.Label("Custom:", GUILayout.Width(55));
+                    gridSizeInputText = GUILayout.TextField(gridSizeInputText, GUILayout.Width(60));
+                    if (GUILayout.Button("Set", GUILayout.Width(40)))
+                    {
+                        if (float.TryParse(gridSizeInputText, out float gv) && gv > 0f)
+                        {
+                            gridSize = gv;
+                        }
+                    }
+                    GUILayout.EndHorizontal();
+                }
+
+                // Rotation snapping
+                GUILayout.Space(3);
+                rotationSnapEnabled = GUILayout.Toggle(rotationSnapEnabled, " Rotation Snap (aligns yaw to increments)");
+                if (rotationSnapEnabled)
+                {
+                    GUILayout.Label("Rotation step:");
+                    int ri = IndexOf(rotationSnapOptions, rotationSnapStep);
+                    string[] rotLabels = { "1°", "5°", "15°", "45°", "90°" };
+                    int newRi = GUILayout.SelectionGrid(ri < 0 ? 2 : ri, rotLabels, 5);
+                    if (newRi != ri && newRi >= 0 && newRi < rotationSnapOptions.Length)
+                    {
+                        rotationSnapStep = rotationSnapOptions[newRi];
+                        spawnYaw = ApplyRotationSnap(spawnYaw);
+                        yawInputText = spawnYaw.ToString("0");
+                    }
+                }
+
+                // Status lines
+                GUILayout.Space(3);
+                GUILayout.Label("Ghost Preview: " + (ghostPreviewEnabled ? "ON" : "OFF"));
+                GUILayout.Label("Grid Snap: " + (gridSnapEnabled ? gridSize.ToString("0") + "m" : "OFF"));
+                GUILayout.Label("Rotation Snap: " + (rotationSnapEnabled ? rotationSnapStep.ToString("0") + "°" : "OFF"));
+            }
+
+            // --- Map Spawn ---
             GUILayout.Space(5);
-            GUILayout.Label("Controls:");
-            GUILayout.Label("Left Click: Spawn | Mid Click: Delete");
-            GUILayout.Label("Ctrl+Scroll: Altitude | Alt+Scroll: Yaw");
-            GUILayout.Label("Shift+Scroll: Faster | RMB: Camera");
+            if (Section("Map Spawn", ref showMapTools))
+            {
+                string mapBtnLabel = mapSpawnMode ? "■ Map Spawn: ON" : "▶ Map Spawn: OFF";
+                if (GUILayout.Button(mapBtnLabel))
+                {
+                    if (mapSpawnMode) ExitMapSpawnMode();
+                    else EnterMapSpawnMode();
+                }
+                if (mapSpawnMode)
+                {
+                    GUILayout.Label("Left-click the map to spawn at the cursor.");
+                    GUILayout.Label("Press M to open/close the map.");
+                }
+            }
 
+            // --- Controls ---
+            GUILayout.Space(5);
+            if (Section("Controls", ref showControls))
+            {
+                GUILayout.Label("Left Click: Spawn  |  Mid Click: Delete");
+                GUILayout.Label("Ctrl+Scroll: Altitude");
+                GUILayout.Label("Alt+Scroll: Yaw");
+                GUILayout.Label("Shift: Larger step (with Ctrl/Alt)");
+                GUILayout.Label("RMB: Camera look  |  WASD/QE: Move");
+            }
+
+            GUILayout.EndScrollView();
             GUI.DragWindow();
+        }
+
+        /// <summary>Draws a foldout button and returns whether the section is open.</summary>
+        private static bool Section(string title, ref bool open)
+        {
+            if (GUILayout.Button((open ? "▼ " : "▶ ") + title))
+            {
+                open = !open;
+            }
+            return open;
+        }
+
+        private static int IndexOf(float[] arr, float value)
+        {
+            for (int i = 0; i < arr.Length; i++)
+            {
+                if (Mathf.Approximately(arr[i], value)) return i;
+            }
+            return -1;
         }
 
         /// <summary>
@@ -529,19 +728,154 @@ namespace HorusMod.Core
             return cachedUnitList;
         }
 
+        // --- Selection helper ---
+        private UnitDefinition GetSelectedDefinition()
+        {
+            var list = GetCurrentList();
+            if (list == null || selectedUnitIndex < 0 || selectedUnitIndex >= list.Count) return null;
+            return list[selectedUnitIndex];
+        }
+
+        // --- Placement math (applied consistently to the ghost AND the real spawn) ---
+
+        private static float NormalizeAngle(float a)
+        {
+            a %= 360f;
+            if (a < 0f) a += 360f;
+            return a;
+        }
+
+        private float ApplyRotationSnap(float yaw)
+        {
+            if (!rotationSnapEnabled || rotationSnapStep <= 0f) return NormalizeAngle(yaw);
+            float snapped = Mathf.Round(yaw / rotationSnapStep) * rotationSnapStep;
+            return NormalizeAngle(snapped);
+        }
+
+        private Vector3 ApplyGridSnap(Vector3 position)
+        {
+            if (!gridSnapEnabled || gridSize <= 0f) return position;
+            position.x = Mathf.Round(position.x / gridSize) * gridSize;
+            position.z = Mathf.Round(position.z / gridSize) * gridSize;
+            return position;
+        }
+
+        private Vector3 ApplyGroundSnap(Vector3 position, UnitDefinition unit, int category)
+        {
+            bool groundCategory = category == 1 || category == 3 || category == 4;
+            if (snapToGround && groundCategory && TrySampleGroundHeight(position, out float groundY))
+            {
+                position.y = groundY + spawnAltitude;
+            }
+            return position;
+        }
+
+        private Quaternion GetPlacementRotation()
+        {
+            Quaternion yawRot = Quaternion.Euler(0f, ApplyRotationSnap(spawnYaw), 0f);
+            bool groundCategory = selectedCategoryIndex == 1 || selectedCategoryIndex == 3 || selectedCategoryIndex == 4;
+            // Experimental: tilt ground units to the surface. Skipped for aircraft/ships and map spawn.
+            if (alignToSurface && groundCategory && !mapSpawnMode)
+            {
+                return Quaternion.FromToRotation(Vector3.up, lastSurfaceNormal) * yawRot;
+            }
+            return yawRot;
+        }
+
+        /// <summary>
+        /// Unified placement pipeline: grid-snap XZ, add altitude, then ground-snap for ground
+        /// categories. Used by both the ghost preview and the real spawn so they always match.
+        /// </summary>
+        private Vector3 GetFinalPlacementPosition(Vector3 rawPosition)
+        {
+            Vector3 pos = ApplyGridSnap(rawPosition);
+            pos.y += spawnAltitude;
+            pos = ApplyGroundSnap(pos, GetSelectedDefinition(), selectedCategoryIndex);
+            if (selectedCategoryIndex == 1 && spawnAltitude == 0f) pos.y += 2f; // small vehicle clearance
+            return pos;
+        }
+
+        // --- Placement sources ---
+
+        private bool TryGet3DPlacement(out Vector3 position)
+        {
+            position = Vector3.zero;
+            Camera cam = Camera.main;
+            if (cam == null) return false;
+            Ray ray = cam.ScreenPointToRay(Input.mousePosition);
+            if (Physics.Raycast(ray, out RaycastHit hit, 100000f))
+            {
+                position = hit.point;
+                lastSurfaceNormal = hit.normal;
+                return true;
+            }
+            return false;
+        }
+
+        private bool TryGetMapPlacement(out Vector3 position)
+        {
+            position = Vector3.zero;
+            var map = SceneSingleton<DynamicMap>.i;
+            if (map == null) return false;
+            if (!map.TryGetCursorCoordinates(out GlobalPosition mapPos)) return false;
+            position = new GlobalPosition(mapPos.x, 0f, mapPos.z).ToLocalPosition();
+            return true;
+        }
+
+        // --- Ghost preview ---
+
+        private void UpdateGhost()
+        {
+            if (!ghostPreviewEnabled || !HorusPermissions.CanSpawn())
+            {
+                if (ghost.IsBuilt) ghost.Clear();
+                return;
+            }
+
+            UnitDefinition def = GetSelectedDefinition();
+            if (def == null)
+            {
+                if (ghost.IsBuilt) ghost.Clear();
+                return;
+            }
+
+            if (ghost.BuiltDefinition != def)
+            {
+                // Don't retry a unit we already failed to build (e.g. no prefab) every frame.
+                if (def == ghostBuildFailedDef)
+                {
+                    ghost.SetVisible(false);
+                    return;
+                }
+                if (!ghost.Build(def))
+                {
+                    ghostBuildFailedDef = def;
+                    return;
+                }
+                ghostBuildFailedDef = null;
+            }
+
+            if (!TryGet3DPlacement(out Vector3 rawPos))
+            {
+                ghost.SetVisible(false);
+                return;
+            }
+
+            ghost.UpdateTransform(GetFinalPlacementPosition(rawPos), GetPlacementRotation());
+            ghost.SetVisible(true);
+        }
+
+        private void OnDestroy()
+        {
+            ghost.Dispose();
+        }
+
         // --- Spawn via Raycast (free camera) ---
         private void HandleSpawnClick()
         {
-            Camera cam = Camera.main;
-            if (cam == null) return;
-            
-            Ray ray = cam.ScreenPointToRay(Input.mousePosition);
-            
-            if (Physics.Raycast(ray, out RaycastHit hit, 100000f))
+            if (TryGet3DPlacement(out Vector3 rawPos))
             {
-                Vector3 finalPos = hit.point + new Vector3(0, spawnAltitude, 0);
-                if (spawnAltitude == 0f && selectedCategoryIndex == 1) finalPos.y += 2f; 
-                SpawnSelectedUnit(finalPos);
+                SpawnSelectedUnit(GetFinalPlacementPosition(rawPos));
             }
         }
 
@@ -550,26 +884,10 @@ namespace HorusMod.Core
         {
             try
             {
-                if (SceneSingleton<DynamicMap>.i == null) return;
-                if (!SceneSingleton<DynamicMap>.i.TryGetCursorCoordinates(out GlobalPosition mapPos)) return;
-
-                // mapPos provides x/z from the map (global space); y is 0. Apply altitude.
-                GlobalPosition spawnGlobalPos = new GlobalPosition(mapPos.x, spawnAltitude, mapPos.z);
-
-                // Convert to a local Vector3 for spawning / ground sampling.
-                Vector3 localPos = spawnGlobalPos.ToLocalPosition();
-
-                // Snap ground-based units (vehicles, buildings, scenery) onto the terrain
-                // so they are not buried at sea level when the cursor is over land.
-                // Aircraft (0) and ships (2) keep their altitude / sea level.
-                bool groundCategory = selectedCategoryIndex == 1 || selectedCategoryIndex == 3 || selectedCategoryIndex == 4;
-                if (snapToGround && groundCategory && TrySampleGroundHeight(localPos, out float groundY))
-                {
-                    localPos.y = groundY + spawnAltitude;
-                }
-
-                HorusPlugin.Logger.LogInfo($"Map spawn at GlobalPos: {spawnGlobalPos}, LocalPos: {localPos}");
-                SpawnSelectedUnit(localPos);
+                if (!TryGetMapPlacement(out Vector3 rawPos)) return;
+                Vector3 finalPos = GetFinalPlacementPosition(rawPos);
+                HorusPlugin.Logger.LogInfo($"Map spawn at local {finalPos}");
+                SpawnSelectedUnit(finalPos);
             }
             catch (Exception ex)
             {
@@ -597,52 +915,133 @@ namespace HorusMod.Core
 
         private void HandleDeleteClick()
         {
+            // Permission gate.
+            if (!HorusPermissions.CanDelete())
+            {
+                HorusPlugin.Logger.LogWarning("Horus: host permission required. Delete blocked.");
+                return;
+            }
+
+            // Never delete while placing from the map.
+            if (mapSpawnMode)
+            {
+                return;
+            }
+
             Camera cam = Camera.main;
             if (cam == null) return;
-            
-            Ray ray = cam.ScreenPointToRay(Input.mousePosition);
-            
-            if (Physics.Raycast(ray, out RaycastHit hit, 100000f))
+
+            if (!Physics.Raycast(cam.ScreenPointToRay(Input.mousePosition), out RaycastHit hit, 100000f))
             {
-                bool isMultiplayer = GameManager.gameState == GameState.Multiplayer;
-                bool isServer = Spawner.i != null && Spawner.i.IsServer;
-
-                if (isMultiplayer && !isServer)
-                {
-                    HorusPlugin.Logger.LogWarning("HorusMod: Cannot delete units as a multiplayer client!");
-                    return;
-                }
-
-                NetworkIdentity netId = hit.collider.GetComponentInParent<NetworkIdentity>();
-                if (netId != null)
-                {
-                    if (isMultiplayer && isServer)
-                    {
-                        NetworkServer.Destroy(netId.gameObject);
-                        HorusPlugin.Logger.LogInfo("HorusMod: Deleted networked unit " + netId.name);
-                    }
-                    else if (!isMultiplayer)
-                    {
-                        Destroy(netId.gameObject);
-                        HorusPlugin.Logger.LogInfo("HorusMod: Deleted local networked unit " + netId.name);
-                    }
-                }
-                else
-                {
-                    Destroy(hit.transform.root.gameObject);
-                    HorusPlugin.Logger.LogInfo("HorusMod: Force deleted local root object.");
-                }
+                return;
             }
+
+            GameObject hitObject = hit.collider != null ? hit.collider.gameObject : null;
+            if (hitObject == null)
+            {
+                HorusPlugin.Logger.LogInfo("Horus: target is not deletable (no object).");
+                return;
+            }
+
+            // Walk UP only to the nearest gameplay unit root. Terrain/roads/static map geometry
+            // have no Unit component, so this returns null and the object is left untouched.
+            Unit unitRoot = FindUnitRoot(hitObject);
+            if (unitRoot == null)
+            {
+                HorusPlugin.Logger.LogInfo($"Horus: target is not deletable (map/environment object '{hitObject.name}').");
+                return;
+            }
+
+            if (!IsSafeDeleteTarget(unitRoot.gameObject))
+            {
+                string reason = IsBuiltinMapUnit(unitRoot)
+                    ? "original map unit is protected"
+                    : "not spawned by Horus (enable Safety/AllowDeletingNonHorusUnits to remove other units)";
+                HorusPlugin.Logger.LogInfo($"Horus: target is not deletable ({reason}): '{unitRoot.unitName}'.");
+                return;
+            }
+
+            DeleteUnit(unitRoot);
+        }
+
+        /// <summary>Destroys a validated unit in a network-safe way and untracks it.</summary>
+        private void DeleteUnit(Unit unit)
+        {
+            if (unit == null) return;
+            GameObject go = unit.gameObject;
+            string unitName = unit.unitName;
+            bool wasHorus = horusSpawnedUnits.Remove(unit);
+
+            if (HorusPermissions.IsMultiplayer())
+            {
+                NetworkServer.Destroy(go);
+            }
+            else
+            {
+                Destroy(go);
+            }
+            HorusPlugin.Logger.LogInfo($"Horus: deleted {(wasHorus ? "Horus-spawned " : "")}unit '{unitName}'.");
+        }
+
+        /// <summary>Finds the nearest gameplay unit root by walking UP the hierarchy only.</summary>
+        private static Unit FindUnitRoot(GameObject target)
+        {
+            return target == null ? null : target.GetComponentInParent<Unit>();
+        }
+
+        private bool HasGameplayUnitComponent(GameObject target)
+        {
+            return FindUnitRoot(target) != null;
+        }
+
+        private bool WasSpawnedByHorus(GameObject target)
+        {
+            Unit u = FindUnitRoot(target);
+            return u != null && horusSpawnedUnits.Contains(u);
+        }
+
+        private bool IsMapOrEnvironmentObject(GameObject target)
+        {
+            if (target == null) return true;
+            // No Unit anywhere up the hierarchy => terrain/road/static geometry/map prop.
+            if (FindUnitRoot(target) == null) return true;
+            // DynamicMap / map UI objects.
+            if (target.GetComponentInParent<DynamicMap>() != null) return true;
+            return false;
+        }
+
+        private static bool IsBuiltinMapUnit(Unit unit)
+        {
+            if (unit == null) return false;
+            string uniqueName = unit.UniqueName;
+            return !string.IsNullOrEmpty(uniqueName)
+                && uniqueName.StartsWith(Unit.BUILTIN_UNIT_PREFIX, StringComparison.Ordinal);
+        }
+
+        /// <summary>
+        /// True only for objects that are safe to delete: a real gameplay unit that was either
+        /// spawned by Horus, or (when explicitly allowed) any non-builtin gameplay unit. Map and
+        /// environment objects can never pass this check.
+        /// </summary>
+        private bool IsSafeDeleteTarget(GameObject target)
+        {
+            if (target == null) return false;
+            if (IsMapOrEnvironmentObject(target)) return false;
+            if (WasSpawnedByHorus(target)) return true;
+            if (HorusPlugin.AllowDeletingNonHorusUnits.Value
+                && HasGameplayUnitComponent(target)
+                && !IsBuiltinMapUnit(FindUnitRoot(target)))
+            {
+                return true;
+            }
+            return false;
         }
 
         private void SpawnSelectedUnit(Vector3 position)
         {
-            bool isMultiplayer = GameManager.gameState == GameState.Multiplayer;
-            bool isServer = Spawner.i != null && Spawner.i.IsServer;
-
-            if (isMultiplayer && !isServer)
+            if (!HorusPermissions.CanSpawn())
             {
-                HorusPlugin.Logger.LogWarning("HorusMod: Must be server to spawn units in multiplayer!");
+                HorusPlugin.Logger.LogWarning("Horus: host permission required. Cannot spawn.");
                 return;
             }
 
@@ -655,18 +1054,21 @@ namespace HorusMod.Core
             var factions = FactionRegistry.factions;
             if (factions == null || factions.Count == 0) return;
 
-            var list = GetCurrentList();
-            if (list == null || selectedUnitIndex < 0 || selectedUnitIndex >= list.Count) return;
+            UnitDefinition def = GetSelectedDefinition();
+            if (def == null) return;
 
-            UnitDefinition def = list[selectedUnitIndex];
             Faction faction = factions[selectedFactionIndex];
             FactionHQ hq = FactionRegistry.HQFromFaction(faction);
 
             GlobalPosition globalPos = position.ToGlobalPosition();
-            Quaternion rotation = Quaternion.Euler(0f, spawnYaw, 0f);
-            
-            Spawner.i.SpawnFromUnitDefinitionInEditor(def, globalPos, rotation, hq, "");
-            HorusPlugin.Logger.LogInfo($"HorusMod: Spawned {def.unitName} at {globalPos} yaw={spawnYaw:F0}°");
+            Quaternion rotation = GetPlacementRotation();
+
+            Unit spawned = Spawner.i.SpawnFromUnitDefinitionInEditor(def, globalPos, rotation, hq, "");
+            if (spawned != null)
+            {
+                horusSpawnedUnits.Add(spawned);
+            }
+            HorusPlugin.Logger.LogInfo($"HorusMod: Spawned {def.unitName} at {globalPos} yaw={spawnYaw:F0}° (tracked={spawned != null})");
         }
     }
 }
