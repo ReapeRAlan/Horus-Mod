@@ -11,11 +11,13 @@ namespace HorusMod
     {
         public const string PluginGuid = "com.reaperalan.horusmod";
         public const string PluginName = "Horus Mod Starter";
-        public const string PluginVersion = "1.0.9";
+        public const string PluginVersion = "1.1.0";
 
         public static new ManualLogSource Logger { get; private set; }
         public static ConfigEntry<KeyCode> HotkeyToggleMode { get; private set; }
         public static ConfigEntry<KeyCode> HotkeyToggleUI { get; private set; }
+        public static ConfigEntry<float> AltitudeStep { get; private set; }
+        public static ConfigEntry<float> RotationStep { get; private set; }
 
         private void Awake()
         {
@@ -25,6 +27,8 @@ namespace HorusMod
             // Bind configurations
             HotkeyToggleMode = Config.Bind("Controls", "ToggleHorusMode", KeyCode.F9, "Key to toggle Horus Mode");
             HotkeyToggleUI = Config.Bind("Controls", "ToggleUI", KeyCode.F10, "Key to toggle the UI");
+            AltitudeStep = Config.Bind("Placement", "AltitudeStep", 50f, "Altitude change per scroll tick (meters)");
+            RotationStep = Config.Bind("Placement", "RotationStep", 15f, "Rotation change per scroll tick (degrees)");
 
             try
             {
