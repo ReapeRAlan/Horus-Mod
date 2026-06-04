@@ -1,0 +1,20 @@
+{
+  "id": "HorusMod",
+  "displayName": "Horus Mod Starter",
+  "description": "A Game Master/Free Camera utility mod that allows the host or local player to spawn aircraft, vehicles, ships, and buildings in real time.",
+  "urls": {
+    "website": "https://github.com/ReapeRAlan/Horus-Mod"
+  },
+  "authors": [
+    "ReapeRAlan"
+  ],
+  "githubOwner": "ReapeRAlan",
+  "githubRepoName": "Horus-Mod",
+  "autoUpdateArtifacts": true,
+  "artifacts": [
+    {
+      "version": "1.0.9",
+      "artifactUrl": "https://github.com/ReapeRAlan/Horus-Mod/releases/download/v1.0.9/Horus_Mod_Starter_v1.0.9.zip"
+    }
+  ]
+}

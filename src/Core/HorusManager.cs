@@ -329,6 +329,12 @@ namespace HorusMod.Core
                 return;
             }
 
+            if (Spawner.i == null)
+            {
+                HorusPlugin.Logger.LogError("HorusMod: Spawner.i is null. Cannot spawn unit.");
+                return;
+            }
+
             var factions = FactionRegistry.factions;
             if (factions == null || factions.Count == 0) return;
 

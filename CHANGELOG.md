@@ -1,6 +1,6 @@
 # Changelog
 
-## [1.0.9] - Unreleased
+## [1.0.9] - 2026-06-04
 ### Changed
 - Re-branded from Zeus Mod to Horus Mod Starter.
 - Completely restructured the project for professional GitHub open-source release.

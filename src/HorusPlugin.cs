@@ -26,13 +26,27 @@ namespace HorusMod
             HotkeyToggleMode = Config.Bind("Controls", "ToggleHorusMode", KeyCode.F9, "Key to toggle Horus Mode");
             HotkeyToggleUI = Config.Bind("Controls", "ToggleUI", KeyCode.F10, "Key to toggle the UI");
 
-            // Patch CameraFreeState to prevent input fighting
-            var harmony = new HarmonyLib.Harmony(PluginGuid);
-            var original = typeof(CameraFreeState).GetMethod(nameof(CameraFreeState.UpdateState));
-            var prefix = typeof(CameraFreeStatePatch).GetMethod(nameof(CameraFreeStatePatch.Prefix));
-            harmony.Patch(original, new HarmonyLib.HarmonyMethod(prefix));
-            
-            Logger.LogInfo($"{PluginName}: Harmony patch applied successfully.");
+            try
+            {
+                // Patch CameraFreeState to prevent input fighting
+                var harmony = new HarmonyLib.Harmony(PluginGuid);
+                var original = typeof(CameraFreeState).GetMethod(nameof(CameraFreeState.UpdateState));
+                
+                if (original != null)
+                {
+                    var prefix = typeof(CameraFreeStatePatch).GetMethod(nameof(CameraFreeStatePatch.Prefix));
+                    harmony.Patch(original, new HarmonyLib.HarmonyMethod(prefix));
+                    Logger.LogInfo($"{PluginName}: Harmony patch applied successfully.");
+                }
+                else
+                {
+                    Logger.LogError($"{PluginName}: Could not find CameraFreeState.UpdateState. Game may have updated.");
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError($"{PluginName}: Failed to apply Harmony patch. Exception: {ex.Message}");
+            }
 
             var go = new GameObject("HorusModManager");
             DontDestroyOnLoad(go);
