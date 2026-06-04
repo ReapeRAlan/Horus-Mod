@@ -13,19 +13,25 @@ namespace HorusMod.Core
         public bool IsHorusActive => horusActive;
 
         private bool horusActive = false;
-        private Rect windowRect = new Rect(20, 20, 320, 550);
+        private Rect windowRect = new Rect(20, 20, 340, 600);
         
         private int selectedFactionIndex = 0;
         private int selectedCategoryIndex = 0;
         private int selectedUnitIndex = 0;
         
         private float spawnAltitude = 0f;
+        private string altitudeInputText = "0";
         private bool hideGUI = false;
+        private bool isMouseOverGUI = false;
 
         private Vector2 scrollPosition;
 
         private float rotationX = 0f;
         private float rotationY = 0f;
+
+        // Cached deduplicated unit lists to avoid rebuilding every frame
+        private int cachedCategoryIndex = -1;
+        private List<UnitDefinition> cachedUnitList;
 
         private void Awake()
         {
@@ -48,20 +54,34 @@ namespace HorusMod.Core
                     hideGUI = !hideGUI;
                 }
 
-                ManageCameraAndInput();
-
-                if (Input.GetMouseButtonDown(0))
+                // Only process camera/world input when NOT hovering over the GUI window
+                if (!isMouseOverGUI)
                 {
-                    Vector2 mousePos = new Vector2(Input.mousePosition.x, Screen.height - Input.mousePosition.y);
-                    if (hideGUI || !windowRect.Contains(mousePos))
+                    ManageCameraAndInput();
+
+                    if (Input.GetMouseButtonDown(0))
                     {
                         HandleSpawnClick();
                     }
-                }
 
-                if (Input.GetMouseButtonDown(2))
+                    if (Input.GetMouseButtonDown(2))
+                    {
+                        HandleDeleteClick();
+                    }
+                }
+                else
                 {
-                    HandleDeleteClick();
+                    // Still allow camera rotation with right-click even over UI
+                    if (Input.GetMouseButton(1))
+                    {
+                        Cursor.lockState = CursorLockMode.Locked;
+                        Cursor.visible = false;
+                    }
+                    else
+                    {
+                        Cursor.lockState = CursorLockMode.None;
+                        Cursor.visible = true;
+                    }
                 }
             }
         }
@@ -159,11 +179,26 @@ namespace HorusMod.Core
                 rotationX = CameraStateManager.i.transform.eulerAngles.y;
                 rotationY = CameraStateManager.i.transform.eulerAngles.x;
             }
+
+            // Invalidate cached list when toggling mode
+            cachedCategoryIndex = -1;
         }
 
         private void OnGUI()
         {
             if (!horusActive || hideGUI) return;
+
+            // Consume scroll wheel events when mouse is over the GUI window
+            // This prevents the game from eating them before IMGUI can use them
+            Vector2 mouseScreenPos = new Vector2(Input.mousePosition.x, Screen.height - Input.mousePosition.y);
+            isMouseOverGUI = windowRect.Contains(mouseScreenPos);
+
+            if (isMouseOverGUI)
+            {
+                // Eat the scroll wheel event so the game doesn't process it
+                Input.ResetInputAxes();
+            }
+
             windowRect = GUI.Window(999, windowRect, DrawHorusWindow, $"⚡ Horus Editor ({HorusPlugin.HotkeyToggleMode.Value} to exit, {HorusPlugin.HotkeyToggleUI.Value} to hide UI)");
         }
 
@@ -203,19 +238,22 @@ namespace HorusMod.Core
             if (oldCat != selectedCategoryIndex) 
             {
                 selectedUnitIndex = 0;
+                cachedCategoryIndex = -1; // Invalidate cache on category change
                 if (selectedCategoryIndex == 0) spawnAltitude = 3000f;
                 else spawnAltitude = 0f;
+                altitudeInputText = spawnAltitude.ToString("0");
             }
 
             List<UnitDefinition> currentList = GetCurrentList();
 
             GUILayout.Space(10);
-            GUILayout.Label("Unit to Spawn:");
-            scrollPosition = GUILayout.BeginScrollView(scrollPosition, GUILayout.Height(180));
+            GUILayout.Label($"Unit to Spawn: ({currentList.Count} units)");
+            scrollPosition = GUILayout.BeginScrollView(scrollPosition, GUILayout.Height(200));
             
             if (currentList != null && currentList.Count > 0)
             {
                 string[] unitNames = currentList.Select(u => u.unitName).ToArray();
+                if (selectedUnitIndex >= currentList.Count) selectedUnitIndex = 0;
                 selectedUnitIndex = GUILayout.SelectionGrid(selectedUnitIndex, unitNames, 1);
             }
             else
@@ -225,15 +263,40 @@ namespace HorusMod.Core
             
             GUILayout.EndScrollView();
 
+            // --- Altitude Controls ---
             GUILayout.Space(10);
-            GUILayout.Label($"Spawn Altitude Offset: {spawnAltitude} m");
-            spawnAltitude = GUILayout.HorizontalSlider(spawnAltitude, 0f, 15000f);
-            spawnAltitude = Mathf.Round(spawnAltitude / 100f) * 100f;
-
-            if (GUILayout.Button("Reset Altitude to Ground (0m)"))
+            GUILayout.Label($"Spawn Altitude: {spawnAltitude:F0} m");
+            
+            // Slider
+            float newAltitude = GUILayout.HorizontalSlider(spawnAltitude, 0f, 15000f);
+            if (Mathf.Abs(newAltitude - spawnAltitude) > 0.01f)
             {
-                spawnAltitude = 0f;
+                spawnAltitude = Mathf.Round(newAltitude / 50f) * 50f;
+                altitudeInputText = spawnAltitude.ToString("0");
             }
+
+            // Custom input field
+            GUILayout.BeginHorizontal();
+            GUILayout.Label("Custom:", GUILayout.Width(55));
+            altitudeInputText = GUILayout.TextField(altitudeInputText, GUILayout.Width(100));
+            if (GUILayout.Button("Set", GUILayout.Width(45)))
+            {
+                if (float.TryParse(altitudeInputText, out float parsed))
+                {
+                    spawnAltitude = Mathf.Clamp(parsed, 0f, 50000f);
+                    altitudeInputText = spawnAltitude.ToString("0");
+                }
+            }
+            GUILayout.EndHorizontal();
+
+            // Preset altitude buttons
+            GUILayout.BeginHorizontal();
+            if (GUILayout.Button("0m")) { spawnAltitude = 0f; altitudeInputText = "0"; }
+            if (GUILayout.Button("100m")) { spawnAltitude = 100f; altitudeInputText = "100"; }
+            if (GUILayout.Button("1k")) { spawnAltitude = 1000f; altitudeInputText = "1000"; }
+            if (GUILayout.Button("3k")) { spawnAltitude = 3000f; altitudeInputText = "3000"; }
+            if (GUILayout.Button("5k")) { spawnAltitude = 5000f; altitudeInputText = "5000"; }
+            GUILayout.EndHorizontal();
 
             GUILayout.Space(10);
             GUILayout.Label("Controls:");
@@ -245,17 +308,48 @@ namespace HorusMod.Core
             GUI.DragWindow();
         }
 
+        /// <summary>
+        /// Returns a deduplicated list of units for the current category.
+        /// Uses a cache to avoid rebuilding the list every OnGUI frame.
+        /// </summary>
         private List<UnitDefinition> GetCurrentList()
         {
+            if (cachedCategoryIndex == selectedCategoryIndex && cachedUnitList != null)
+            {
+                return cachedUnitList;
+            }
+
+            List<UnitDefinition> rawList;
             switch (selectedCategoryIndex)
             {
-                case 0: return Encyclopedia.i.aircraft.Cast<UnitDefinition>().ToList();
-                case 1: return Encyclopedia.i.vehicles.Cast<UnitDefinition>().ToList();
-                case 2: return Encyclopedia.i.ships.Cast<UnitDefinition>().ToList();
-                case 3: return Encyclopedia.i.buildings.Cast<UnitDefinition>().ToList();
-                case 4: return Encyclopedia.i.scenery.Cast<UnitDefinition>().ToList();
-                default: return new List<UnitDefinition>();
+                case 0: rawList = Encyclopedia.i.aircraft.Cast<UnitDefinition>().ToList(); break;
+                case 1: rawList = Encyclopedia.i.vehicles.Cast<UnitDefinition>().ToList(); break;
+                case 2: rawList = Encyclopedia.i.ships.Cast<UnitDefinition>().ToList(); break;
+                case 3: rawList = Encyclopedia.i.buildings.Cast<UnitDefinition>().ToList(); break;
+                case 4: rawList = Encyclopedia.i.scenery.Cast<UnitDefinition>().ToList(); break;
+                default: rawList = new List<UnitDefinition>(); break;
             }
+
+            // Deduplicate: keep first occurrence of each unit name, skip unnamed/empty
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var deduped = new List<UnitDefinition>();
+            foreach (var unit in rawList)
+            {
+                string name = unit.unitName;
+                if (string.IsNullOrEmpty(name) || name == "???")
+                    continue;
+                if (seen.Add(name))
+                {
+                    deduped.Add(unit);
+                }
+            }
+
+            // Sort alphabetically for easier browsing
+            deduped.Sort((a, b) => string.Compare(a.unitName, b.unitName, StringComparison.OrdinalIgnoreCase));
+
+            cachedUnitList = deduped;
+            cachedCategoryIndex = selectedCategoryIndex;
+            return cachedUnitList;
         }
 
         private void HandleSpawnClick()
