@@ -927,60 +927,28 @@ namespace HorusMod.Core
             {
                 return;
             }
-
-            Camera cam = Camera.main;
-            if (cam == null) return;
-
-            if (!Physics.Raycast(cam.ScreenPointToRay(Input.mousePosition), out RaycastHit hit, 100000f))
+            
+            if (!TryGet3DPlacement(out var localPos)) return;
+            var globalPos = localPos.ToGlobalPosition();
+            DeleteNearestUnit(globalPos);
+        }
+        
+        /// <summary>Destroys a validated unit in a network-safe way and untracks it.</summary>
+        private void DeleteNearestUnit(GlobalPosition pos)
+        {
+            UnitRegistry.TryGetNearestUnit(pos, out var go, 100f);
+            string unitName = go.unitName;
+            
+            if (!IsSafeDeleteTarget(go.gameObject))
             {
-                return;
-            }
-
-            GameObject hitObject = hit.collider != null ? hit.collider.gameObject : null;
-            if (hitObject == null)
-            {
-                HorusPlugin.Logger.LogInfo("Horus: target is not deletable (no object).");
-                return;
-            }
-
-            // Walk UP only to the nearest gameplay unit root. Terrain/roads/static map geometry
-            // have no Unit component, so this returns null and the object is left untouched.
-            Unit unitRoot = FindUnitRoot(hitObject);
-            if (unitRoot == null)
-            {
-                HorusPlugin.Logger.LogInfo($"Horus: target is not deletable (map/environment object '{hitObject.name}').");
-                return;
-            }
-
-            if (!IsSafeDeleteTarget(unitRoot.gameObject))
-            {
-                string reason = IsBuiltinMapUnit(unitRoot)
+                string reason = IsBuiltinMapUnit(go)
                     ? "original map unit is protected"
                     : "not spawned by Horus (enable Safety/AllowDeletingNonHorusUnits to remove other units)";
-                HorusPlugin.Logger.LogInfo($"Horus: target is not deletable ({reason}): '{unitRoot.unitName}'.");
+                HorusPlugin.Logger.LogInfo($"Horus: target is not deletable ({reason}): '{go.unitName}'.");
                 return;
             }
-
-            DeleteUnit(unitRoot);
-        }
-
-        /// <summary>Destroys a validated unit in a network-safe way and untracks it.</summary>
-        private void DeleteUnit(Unit unit)
-        {
-            if (unit == null) return;
-            GameObject go = unit.gameObject;
-            string unitName = unit.unitName;
-            bool wasHorus = horusSpawnedUnits.Remove(unit);
-
-            if (HorusPermissions.IsMultiplayer())
-            {
-                NetworkServer.Destroy(go);
-            }
-            else
-            {
-                Destroy(go);
-            }
-            HorusPlugin.Logger.LogInfo($"Horus: deleted {(wasHorus ? "Horus-spawned " : "")}unit '{unitName}'.");
+            Destroy(go);
+            HorusPlugin.Logger.LogInfo($"Deleted unit {unitName}");
         }
 
         /// <summary>Finds the nearest gameplay unit root by walking UP the hierarchy only.</summary>
