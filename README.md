@@ -18,7 +18,14 @@ A Game Master/Free Camera utility mod for Nuclear Option (formerly known as Zeus
 - **Map Spawn Mode**: open the map and click anywhere to place units at that location.
 - Reset buttons for altitude and yaw.
 - Collapsible UI sections with live status labels.
-- **Host-authoritative multiplayer**: clients are blocked by default and the UI shows the current permission status.
+- **Groups & Formations**: spawn groups of up to 20 units in Column, Line, Grid, Circle, or V formations with adjustable spacing and Group Ghost Previews.
+- **Group Presets**: quick buttons to configure groups (Convoy, Armored Group, Squadron, Air Patrol, Naval Group, AA Battery, Base Defense).
+- **Custom Group Editor**: build and save heterogeneous groups of mixed unit types, serialized to JSON configuration files.
+- **Spawn Stationary**: option to set ground vehicles/ships to hold position on spawn (applies to both single and group spawns).
+- **RTS / Budget Mode**: Real-Time Strategy economy mode. Spawning units/groups costs faction budget, tracking Primeva and Boscali budgets independently. Spawning is blocked on insufficient budget. Includes manual budget adjustments (host-only) in the UI. Loads costs and passive income from `BepInEx/config/HorusMod/rts_economy.json` (auto-created on startup with default values).
+- **RTS Factories & Production**: host-created visible factory buildings that generate income, loop production queues, use type-correct spawn rules, support rally points, and persist to JSON.
+- **Host-authoritative multiplayer**: clients are blocked by default and the UI shows the current permission status. All spawn, delete, and budget modifications are validated server-side.
+- **Camera/Control Restore**: saves and restores aircraft control and camera view states. Temporarily suspends flight controls during Horus Mode to avoid input fighting.
 
 ## Installation
 > [!IMPORTANT]
@@ -32,7 +39,7 @@ A Game Master/Free Camera utility mod for Nuclear Option (formerly known as Zeus
 ## Controls
 - **F9** (configurable): Toggle Horus Mode
 - **F10** (configurable): Hide/Show UI
-- **Left Click**: Spawn selected unit (or place at map cursor in Map Spawn Mode)
+- **Left Click**: Spawn selected unit/group (or place at map cursor in Map Spawn Mode)
 - **Middle Click**: Delete a unit spawned by Horus (safe delete — map/environment is protected)
 - **Right Click (Hold)**: Rotate Camera
 - **W/A/S/D/Q/E**: Move Camera
@@ -50,16 +57,67 @@ Open the **Placement Tools** section in the Horus window to control how units ar
 - **Grid Snap**: aligns the placement position to a configurable spacing (1–100m or custom) for tidy rows and bases.
 - **Rotation Snap**: snaps yaw to fixed increments (1° / 5° / 15° / 45° / 90°).
 
-### Safe Delete
-Middle-click delete only removes **units that Horus spawned this session**. Terrain, roads, static map geometry, the map UI, and original mission units are never deletable. If you middle-click something protected, Horus does nothing and logs the reason to `LogOutput.log`.
+### Groups & Formations
+Open the **Groups & Formations** section in the Horus window to control group spawning:
+- **Enable Group Spawning**: Spawns a group of units in formation instead of a single unit. Renders a multi-unit Ghost Preview showing exactly where each unit will spawn.
+- **Spawn Ground Units Stationary**: Forces ground vehicles/ships to hold position on spawn rather than patrolling or driving off.
+- **Formation**: Choose from Column, Line, Grid, Circle, or V Formation.
+- **Unit Count**: 1 to 20 units.
+- **Spacing**: 5m to 200m distance between units.
+- **Custom Groups**:
+  1. Go to **Groups & Formations** and select the **Custom Group** preset.
+  2. Click **Add Selected Unit** to add the currently active unit type to the group list.
+  3. Manage the list by clicking `X` next to any unit to remove it.
+  4. Enter a name and click **Save Group** to serialize it to `BepInEx/config/HorusMod/groups/[GroupName].json`.
+  5. Use `<` and `>` to cycle through saved groups, and click **Load Selected** to use them.
 
-Advanced: set `Safety / AllowDeletingNonHorusUnits = true` in the BepInEx config to also delete other real gameplay units. Even then, map/environment objects and original map-baked units remain protected.
+### Safe Delete
+Middle-click delete only removes **units that Horus spawned this session**. Terrain, roads, static map geometry, the map UI, and original mission units are protected by default. If you middle-click something protected, Horus does nothing and logs the reason to `LogOutput.log`.
+
+Advanced config:
+- Set `Safety / AllowDeletingNonHorusUnits = true` in the BepInEx config to allow deleting non-Horus spawned gameplay units.
+- Set `Safety / AllowDeletingOriginalMissionUnits = true` in the BepInEx config to also allow deleting original builtin map-baked mission units.
+Even with these enabled, terrain, roads, static geometry, and map structures remain strictly protected from deletion.
+
+### RTS / Commander Mode
+You can toggle between **Sandbox Mode** (free spawns, default) and **RTS / Commander Mode** in the Horus window:
+- **Sandbox Mode**: Spawning is free and unrestricted.
+- **RTS / Commander Mode**: Spawning units/groups and factory production deduct costs from the active faction's budget (**Primeva** or **Boscali**).
+  - **Manual Deployment**: Click "Arm Deployment" first, view the cost preview, then left-click in the world to spawn the unit. The budget is deducted only if placement succeeds.
+  - **Budget & Caps**: Starting budgets, tick income, and unit caps are loaded from `BepInEx/config/HorusMod/rts_economy.json` (auto-created on startup).
+  - **Unit Costs**: Custom costs are resolved from `rts_economy.json` with category-based fallbacks.
+  
+#### RTS Factories & Production
+Factories, bases, or carriers automatically generate income and produce units over time in RTS Mode:
+- **Factory Types**: 
+  - `Economy`: Focuses on budget generation (e.g., +300/min).
+  - `GroundProduction`: Produces ground vehicles in front of the factory exit/door area, with validated terrain height that ignores the factory roof/top.
+  - `AirProduction`: Spawns aircraft at safe flying altitudes (e.g., every 120s).
+  - `NavalProduction`: Spawns ships at ocean level with safe positioning and unique name fixes.
+  - `DefenseProduction`: Spawns stationary defense units, buildings, and batteries in validated ground positions near the factory. Default queue includes `23mm AAA Emplacement`, `IRM-S1 Emplacement`, `AT-145 Emplacement`, `Guard Tower`, `Pillbox`, and `Radar Station`.
+  - `MixedProduction`: Allows mixed queues and chooses the correct ground, air, naval, or defense spawn path per unit.
+- **Visual Factory Buildings**: Virtual factories spawn visible buildings in the world. Defaults are `Storage Tank`, `Large Factory`, `Medium Aircraft Hangar`, and `Radar Station`. Older config names such as `Solar Array`, `Vehicle Factory`, `Hangar`, and `Warehouse` are resolved through aliases.
+- **Queue Loop**: Add units or compatible buildings to a factory's queue; it loops through the production list automatically. If budget or unit cap is insufficient, production pauses and reports the reason.
+- **Rally Points**: Set a rally point using targeted aim. Produced units spawn facing the rally direction automatically.
+- **Persistent Instances**: Factory presets are saved in `BepInEx/config/HorusMod/rts_factories.json`; placed factory instances are saved in `BepInEx/config/HorusMod/rts_factory_instances.json`.
+- **Economy Config**: Budgets, passive income, caps, and costs are saved in `BepInEx/config/HorusMod/rts_economy.json`. Global passive income is optional and lower than factory income in default configs.
+- **How to Create Factories**:
+  1. Under the **RTS Factories & Production** panel, select a preset (e.g. Ground Vehicle Factory).
+  2. Click **Create Factory Here** to spawn a virtual factory with a visible building at the current Horus placement point.
+  3. Or click **Create Factory From Aimed Unit** while aiming at an existing valid unit to attach a factory without spawning an extra visual building.
+- **How to Manage Queue**:
+  1. Select an active factory from the panel list.
+  2. Select any unit in the unit browser list and click **Add Selected Unit To Production Queue** to append it.
+  3. Select a queue entry and click **Remove Selected Queue Item**, or click **Clear Queue** to empty it.
+- **Factory Controls**: Create Factory Here, Create Factory From Aimed Unit, Delete Selected Factory, Enable/Disable Factory, Start All Factories, Stop All Factories, Add/Remove/Clear Queue, Set/Clear Rally Point, Save/Load Factories, Reload Factory Config, and Reset Factory Presets To Defaults.
+- **Group Spawning**: Group spawning remains disabled by default. RTS/Commander Mode is separate from Sandbox Mode.
+- **Multiplayer Safety**: Creation, deletion, editing, queue updates, production ticks, budget changes, save/load, reload, and reset actions are restricted to Single Player or Multiplayer Host. Clients can view safe UI state and see Host-only indicators.
 
 ### Multiplayer Permissions
 Horus is host-authoritative. The UI shows your current mode:
 - **Single Player** — full access.
 - **Multiplayer Host** — full access.
-- **Multiplayer Client - No Permission** — spawning and deleting are blocked by default.
+- **Multiplayer Client - No Permission** — spawning, deleting, and budget adjustments are blocked by default.
 
 Client request/whitelist support is reserved for a future update (config flags `AllowClientHorusRequests` and `EnableExperimentalWhitelist`, both off by default).
 
@@ -68,6 +126,7 @@ Client request/whitelist support is reserved for a future update (config flags `
 2. Left-click anywhere on the map to spawn the selected unit at that location.
 3. Press **M** to toggle the map, or turn Map Spawn off to close it.
 4. Ground units (vehicles, buildings, scenery) snap to terrain by default; toggle this off to use the exact altitude.
+
 
 ## Troubleshooting
 - **"F9 does nothing"**: Verify BepInEx 5 is installed correctly and `LogOutput.log` shows Horus Mod Starter loaded. Check if another mod uses F9. You can change the hotkeys using BepInEx Configuration Manager.

@@ -42,6 +42,10 @@
       <HintPath>$(NuclearOptionDir)\NuclearOption_Data\Managed\UnityEngine.PhysicsModule.dll</HintPath>
       <Private>False</Private>
     </Reference>
+    <Reference Include="UnityEngine.JSONSerializeModule">
+      <HintPath>$(NuclearOptionDir)\NuclearOption_Data\Managed\UnityEngine.JSONSerializeModule.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
     <Reference Include="UnityEngine.InputLegacyModule">
       <HintPath>$(NuclearOptionDir)\NuclearOption_Data\Managed\UnityEngine.InputLegacyModule.dll</HintPath>
       <Private>False</Private>
@@ -58,7 +62,7 @@
   </ItemGroup>
 
   <Target Name="PostBuild" AfterTargets="PostBuildEvent">
-    <Exec Command="if not exist &quot;$(ProjectDir)..\BepInEx\plugins\HorusMod&quot; mkdir &quot;$(ProjectDir)..\BepInEx\plugins\HorusMod&quot;&#xD;&#xA;copy /Y &quot;$(TargetPath)&quot; &quot;$(ProjectDir)..\BepInEx\plugins\HorusMod\$(TargetFileName)&quot;" />
+    <Exec Command="if not exist &quot;$(ProjectDir)..\BepInEx\plugins\HorusMod&quot; mkdir &quot;$(ProjectDir)..\BepInEx\plugins\HorusMod&quot;&#xD;&#xA;if exist &quot;$(ProjectDir)..\BepInEx\plugins\HorusMod\$(TargetFileName).old&quot; del /F /Q &quot;$(ProjectDir)..\BepInEx\plugins\HorusMod\$(TargetFileName).old&quot;&#xD;&#xA;if exist &quot;$(ProjectDir)..\BepInEx\plugins\HorusMod\$(TargetFileName)&quot; move /Y &quot;$(ProjectDir)..\BepInEx\plugins\HorusMod\$(TargetFileName)&quot; &quot;$(ProjectDir)..\BepInEx\plugins\HorusMod\$(TargetFileName).old&quot;&#xD;&#xA;copy /Y &quot;$(TargetPath)&quot; &quot;$(ProjectDir)..\BepInEx\plugins\HorusMod\$(TargetFileName)&quot;" />
   </Target>
 
 </Project>

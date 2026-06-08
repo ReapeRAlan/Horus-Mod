@@ -15,13 +15,13 @@ namespace HorusMod.Placement
     public class GhostPreview
     {
         private GameObject inactiveHolder;
-        private GameObject ghost;
+        private readonly System.Collections.Generic.List<GameObject> ghosts = new System.Collections.Generic.List<GameObject>();
         private UnitDefinition builtDef;
 
         /// <summary>The definition the current ghost mesh was built from (null if none).</summary>
         public UnitDefinition BuiltDefinition => builtDef;
 
-        public bool IsBuilt => ghost != null;
+        public bool IsBuilt => ghosts.Count > 0;
 
         private void EnsureHolder()
         {
@@ -53,16 +53,17 @@ namespace HorusMod.Placement
             try
             {
                 // Instantiate under the inactive holder => Awake/OnEnable do NOT run yet.
-                ghost = UnityEngine.Object.Instantiate(def.unitPrefab, inactiveHolder.transform);
-                ghost.name = "HorusGhost_" + def.unitName;
+                GameObject g = UnityEngine.Object.Instantiate(def.unitPrefab, inactiveHolder.transform);
+                g.name = "HorusGhost_" + def.unitName;
 
-                StripDangerousComponents(ghost);
-                MakeTransparent(ghost);
+                StripDangerousComponents(g);
+                MakeTransparent(g);
 
                 // Move into the live scene and show. All scripts are gone, so activating is safe.
-                ghost.transform.SetParent(null, false);
-                ghost.SetActive(true);
+                g.transform.SetParent(null, false);
+                g.SetActive(true);
 
+                ghosts.Add(g);
                 builtDef = def;
                 return true;
             }
@@ -74,30 +75,91 @@ namespace HorusMod.Placement
             }
         }
 
+        /// <summary>
+        /// Builds multiple visual ghosts for group spawning.
+        /// </summary>
+        public bool BuildGroup(System.Collections.Generic.List<UnitDefinition> definitions)
+        {
+            Clear();
+            if (definitions == null || definitions.Count == 0) return false;
+
+            EnsureHolder();
+
+            try
+            {
+                for (int i = 0; i < definitions.Count; i++)
+                {
+                    var def = definitions[i];
+                    if (def == null || def.unitPrefab == null) continue;
+
+                    GameObject g = UnityEngine.Object.Instantiate(def.unitPrefab, inactiveHolder.transform);
+                    g.name = $"HorusGhost_{i}_{def.unitName}";
+
+                    StripDangerousComponents(g);
+                    MakeTransparent(g);
+
+                    g.transform.SetParent(null, false);
+                    g.SetActive(true);
+
+                    ghosts.Add(g);
+                }
+
+                builtDef = definitions[0];
+                return ghosts.Count > 0;
+            }
+            catch (Exception ex)
+            {
+                HorusPlugin.Logger.LogError($"GhostPreview: failed to build group ghosts: {ex.Message}");
+                Clear();
+                return false;
+            }
+        }
+
         public void UpdateTransform(Vector3 position, Quaternion rotation)
         {
-            if (ghost != null)
+            if (ghosts.Count > 0 && ghosts[0] != null)
             {
-                ghost.transform.SetPositionAndRotation(position, rotation);
+                ghosts[0].transform.SetPositionAndRotation(position, rotation);
+            }
+        }
+
+        public void UpdateTransformGroup(Vector3 centerPos, Quaternion centerRot, System.Collections.Generic.List<Vector3> relativeOffsets, System.Collections.Generic.List<UnitDefinition> definitions, Func<Vector3, UnitDefinition, Vector3> snapFunc)
+        {
+            for (int i = 0; i < ghosts.Count; i++)
+            {
+                if (ghosts[i] == null) continue;
+                Vector3 offset = (i < relativeOffsets.Count) ? relativeOffsets[i] : Vector3.zero;
+                Vector3 rawPos = centerPos + offset;
+
+                UnitDefinition def = (i < definitions.Count) ? definitions[i] : null;
+                Vector3 snappedPos = snapFunc != null ? snapFunc(rawPos, def) : rawPos;
+
+                ghosts[i].transform.SetPositionAndRotation(snappedPos, centerRot);
             }
         }
 
         public void SetVisible(bool visible)
         {
-            if (ghost != null && ghost.activeSelf != visible)
+            for (int i = 0; i < ghosts.Count; i++)
             {
-                ghost.SetActive(visible);
+                if (ghosts[i] != null && ghosts[i].activeSelf != visible)
+                {
+                    ghosts[i].SetActive(visible);
+                }
             }
         }
 
-        /// <summary>Destroys the current ghost mesh (safe to call repeatedly).</summary>
+        /// <summary>Destroys the current ghost meshes (safe to call repeatedly).</summary>
         public void Clear()
         {
-            if (ghost != null)
+            for (int i = 0; i < ghosts.Count; i++)
             {
-                UnityEngine.Object.Destroy(ghost);
-                ghost = null;
+                if (ghosts[i] != null)
+                {
+                    UnityEngine.Object.Destroy(ghosts[i]);
+                }
             }
+            ghosts.Clear();
             builtDef = null;
         }
 

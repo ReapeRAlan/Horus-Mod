@@ -1,5 +1,48 @@
 # Changelog
 
+## [1.2.0] - 2026-06-08
+
+### Added
+- **RTS / Commander Mode Redesign**: Transformed RTS Mode from a basic paid-spawning system into a real-time commander strategy layer with per-faction budget tracking, unit caps, tick-based income, and deployment confirmation.
+- **RTS Factory & Production System**: Added economy, ground, air, naval, and defense factories that generate income and automatically produce units over time using queue looping. Enforces local caps and faction budgets before spawning.
+- **Factory Placement & Anchors**: Support for placing Horus Virtual Factories at the camera crosshair, or attaching/anchoring them directly to existing game buildings, airbases, or ship carriers.
+- **Automatic Auto-Detect**: Added configuration settings (`autoCreateFactoryForAirbaseUnits` and `autoCreateFactoryForCarriers`) to automatically generate production factories for friendly airbases and carrier units on load.
+- **Rally Points**: Added rally point configuration per factory. Units orient themselves toward the rally position upon spawning.
+- **Persistent JSON Configs**: Auto-generates and loads `rts_factories.json` for global factory presets and `rts_factory_instances.json` to persist active factories, queue positions, and state across sessions.
+- **Factory Visual Resolution Logs**: Factory creation now logs preset, requested visual building, resolved building, UnitDefinition lookup status, spawned visual unit, factory id, faction, and position.
+- **Factory Preset Reset**: Added **Reset Factory Presets To Defaults** to regenerate the default preset set, including visual buildings and `Mixed Production`.
+- **Factory Instance Save/Load**: Factory instances now persist preset name, anchor destroyed state, rally point, queue, timer, production index, visual building, and anchor metadata.
+- **Multiplayer Security**: Locked all factory creation, deleting, queue management, and saving/loading actions behind host-authoritative gates. Non-host clients receive clear blocking notifications.
+- **Groups UI Collapsed**: Folded the Groups & Formations section by default (`showGroupTools = false`) and kept group spawning disabled by default to keep the UI clean.
+- **Groups & Formations**: Spawn multiple units in standard formations (**Line**, **Column**, **Grid**, **Circle**, **V Formation**).
+- **Group Presets**: Instantly load preset groups (Convoy, Armored Group, Squadron, Air Patrol, Naval Group, Anti-Air Battery, and Base Defense). Sane defaults for counts, spacing, formation, stationary behavior, and altitudes (e.g. 1000m for Squadron, 1500m for Air Patrol).
+- **Custom Group Editor**: Build custom groups containing a mix of unit types, with a visual list, save/load features using JSON, and an in-game file selector.
+- **Group Ghost Previews**: Renders transparent preview meshes of all units in the selected formation, spacing, and height adjustments before placement.
+- **Spawn Ground Units Stationary**: Option to lock spawned vehicles and ships in a stationary state using `.SetHoldPosition(true)` (applies to both single and group spawns).
+- **Camera/Control Restore**: Saves and restores cockpit/camera state, following unit, and flight controls state (`GameManager.flightControlsEnabled`) when entering/exiting Horus Mode. If the aircraft was destroyed during Horus Mode, it prints a message and handles it safely without crashing.
+- **Safety Deletion Toggle**: Added `AllowDeletingOriginalMissionUnits` configuration option to permit deleting built-in map units.
+- **Custom Group JSON Validation**: Catch broken/empty custom group JSON files, showing a clear warning, and protecting group spawns from executing with empty groups.
+- **Ocean Height & Snapping**: Added automated ocean level snapping for ships, manual ocean snapping toggle, and configurable custom ocean heights.
+
+### Changed
+- **Nearest Unit Deletion**: Target nearest unit in range (25m/50m/100m/custom) on middle-click instead of requiring direct hit.
+- **Client Permissions Gate**: Audited and strictly restricted all client-side spawn, delete, and economy actions to enforce host-authoritative multiplayer validation.
+- Refactored height snapping to calculate elevation individually per unit in group formations.
+- Added GUI detection to prevent camera zoom/look movement and unit placing/deleting while hovering the mouse over the F10 configuration window.
+- Existing `rts_factories.json` files with missing `visualBuilding` fields are completed in memory, while old invalid names still resolve through alias/fallback mapping.
+- Factory production now validates queue entries by factory type, uses dedicated ground/air/naval/defense spawn paths, pauses on budget/cap/anchor failures, and cleans produced-unit tracking every 5 seconds.
+- Ground factory production now prefers validated positions in front of the factory exit/door area and samples terrain while ignoring unit colliders, so produced vehicles do not use the factory roof/top as ground.
+- Ground and defense production force-correct the spawned transform to the validated terrain position after editor spawn, preventing the spawner from leaving units above the factory visual.
+- Defense factory defaults now include multiple real building/defense definitions: `23mm AAA Emplacement`, `IRM-S1 Emplacement`, `AT-145 Emplacement`, `Guard Tower`, `Pillbox`, and `Radar Station`.
+
+### Fixed
+- Virtual factory creation now spawns a visible world building using valid encyclopedia entries (`Storage Tank`, `Large Factory`, `Medium Aircraft Hangar`, `Radar Station`) and registers the factory in `activeFactories`.
+- Factory income and production stop when an attached or visual anchor is destroyed.
+- Loading factory instances replaces the current list instead of duplicating factories on repeated loads.
+
+
+---
+
 ## [1.1.0] - 2026-06-04
 
 ### Added
