@@ -11,11 +11,12 @@ namespace HorusMod
     {
         public const string PluginGuid = "com.reaperalan.horusmod";
         public const string PluginName = "Horus Mod Starter";
-        public const string PluginVersion = "1.2.0";
+        public const string PluginVersion = "1.2.1";
 
         public static new ManualLogSource Logger { get; private set; }
         public static ConfigEntry<KeyCode> HotkeyToggleMode { get; private set; }
         public static ConfigEntry<KeyCode> HotkeyToggleUI { get; private set; }
+        public static ConfigEntry<float> UIScale { get; private set; }
         public static ConfigEntry<float> AltitudeStep { get; private set; }
         public static ConfigEntry<float> AltitudeStepLarge { get; private set; }
         public static ConfigEntry<float> RotationStep { get; private set; }
@@ -30,6 +31,7 @@ namespace HorusMod
         public static ConfigEntry<bool> OceanSnapActive { get; private set; }
         public static ConfigEntry<float> OceanHeightOverride { get; private set; }
         public static ConfigEntry<float> DeleteRange { get; private set; }
+        public static ConfigEntry<bool> CreditKillsToSpawner { get; private set; }
         public static ConfigEntry<bool> SpawnGroundUnitsStationary { get; private set; }
         public static ConfigEntry<bool> EnableGroupSpawn { get; private set; }
         public static ConfigEntry<float> ShipSpawnLift { get; private set; }
@@ -47,6 +49,7 @@ namespace HorusMod
         public static ConfigEntry<bool> EnableRtsIncome { get; private set; }
         public static ConfigEntry<float> IncomeTickSeconds { get; private set; }
         public static ConfigEntry<bool> EnableRtsUnitCap { get; private set; }
+        public static ConfigEntry<bool> SyncWithFactionBudget { get; private set; }
         public static ConfigEntry<bool> EnableStrictBaseDeployment { get; private set; }
         public static ConfigEntry<float> BaseDeploymentRadius { get; private set; }
 
@@ -70,6 +73,7 @@ namespace HorusMod
             // Bind configurations
             HotkeyToggleMode = Config.Bind("Controls", "ToggleHorusMode", KeyCode.F9, "Key to toggle Horus Mode");
             HotkeyToggleUI = Config.Bind("Controls", "ToggleUI", KeyCode.F10, "Key to toggle the UI");
+            UIScale = Config.Bind("UI", "UIScale", 1.0f, "Scale factor for the Horus UI (e.g. 1.0 for 1080p, 1.5 for 1440p, 2.0 for 4K)");
             AltitudeStep = Config.Bind("Placement", "AltitudeStep", 50f, "Altitude change per scroll tick with Ctrl+Scroll (meters)");
             AltitudeStepLarge = Config.Bind("Placement", "AltitudeStepLarge", 500f, "Altitude change per scroll tick with Ctrl+Shift+Scroll (meters)");
             RotationStep = Config.Bind("Placement", "RotationStep", 5f, "Yaw change per scroll tick with Alt+Scroll (degrees)");
@@ -84,6 +88,7 @@ namespace HorusMod
             OceanSnapActive = Config.Bind("Placement", "OceanSnapActive", false, "Manually force placement of all units to snap to the ocean level.");
             OceanHeightOverride = Config.Bind("Placement", "OceanHeightOverride", -9999f, "Manual override for the ocean level height. If -9999 (default), it uses the game's sea level.");
             DeleteRange = Config.Bind("Safety", "DeleteRange", 50f, "The search radius around the cursor hit point to find units when middle-clicking to delete (meters).");
+            CreditKillsToSpawner = Config.Bind("Multiplayer", "CreditKillsToSpawner", false, "[Experimental] Try to credit kills made by Horus spawned units to the player who spawned them. Note: May have side effects.");
             SpawnGroundUnitsStationary = Config.Bind("Groups", "SpawnGroundUnitsStationary", false, "Spawn ground vehicles/ships in a stationary/parked state (hold position).");
             EnableGroupSpawn = Config.Bind("Groups", "EnableGroupSpawn", false, "Enable spawning groups of units in formation instead of single units.");
             ShipSpawnLift = Config.Bind("Placement", "ShipSpawnLift", 3f, "Extra elevation lift for safe ship spawning to prevent dragging on the seabed (meters).");
@@ -101,6 +106,7 @@ namespace HorusMod
             EnableRtsIncome = Config.Bind("RTS", "EnableRtsIncome", true, "If true, factions receive passive income every tick in RTS Mode.");
             IncomeTickSeconds = Config.Bind("RTS", "IncomeTickSeconds", 5.0f, "Seconds between income ticks in RTS Mode.");
             EnableRtsUnitCap = Config.Bind("RTS", "EnableRtsUnitCap", true, "If true, enforce per-faction unit caps in RTS Mode.");
+            SyncWithFactionBudget = Config.Bind("RTS", "SyncWithFactionBudget", false, "If true, the RTS budget is synced with the actual in-game faction budget instead of local Horus budget.");
             EnableStrictBaseDeployment = Config.Bind("RTS", "EnableStrictBaseDeployment", false, "If true, units can only be deployed within BaseDeploymentRadius of a friendly building/carrier.");
             BaseDeploymentRadius = Config.Bind("RTS", "BaseDeploymentRadius", 3000f, "Radius in meters for strict base deployment restriction.");
 

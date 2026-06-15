@@ -1,5 +1,26 @@
 # Changelog
 
+## [1.2.1] - 2026-06-10
+
+### Added
+- **UI Reset Hotkey**: Press `Ctrl + F10` to force UI visibility and reset window position.
+- **Reset Window Button**: Added a button under "Placement Tools" to reset the UI position.
+- **UI Scaling**: Added `UIScale` config option for high-resolution displays (e.g. set to `1.5` for 1440p).
+- **RTS Unit Cap Configuration**: Added buttons in the RTS Commander menu to adjust the unit cap for each faction during a match.
+- **RTS Budget Synchronization**: Added `SyncWithFactionBudget` configuration option. If enabled, the RTS Commander budget reflects the actual Nuclear Option faction budget.
+- **Beginner-Friendly Labels**: Added helpful context labels underneath advanced tools explaining their use.
+- **Diagnostics Panel**: Added a `Debug / Diagnostics` panel to view Horus status, spawn counts, factory counts, and to reload configs from disk in-game.
+
+### Changed
+- **Menu Reorganization**: Completely overhauled the `Horus Editor` UI to group similar features together chronologically (Status, Unit Selection, Placement Tools, Spawn Actions, Map Spawn, Groups & Formations, RTS, Safe Delete, Diagnostics).
+- **Visual Hierarchy**: Added clear `══ SECTION ══` headers, consistent spacing, and status colors (e.g. green for Host, red for Client No Permission) to improve readability.
+- Moved "Spawn Ground Units Stationary" toggle from Group Tools to Placement Tools.
+- Refactored unit deletion logic into a separate `HorusDeleteManager` for better architecture.
+- Refactored the UI rendering out of `HorusManager` into a partial `HorusManager_UI` script to keep the core script lightweight.
+
+### Fixed
+- Fixed an issue where the Horus UI window would stop drawing or disappear offscreen, requiring a game restart.
+
 ## [1.2.0] - 2026-06-08
 
 ### Added

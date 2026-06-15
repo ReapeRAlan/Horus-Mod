@@ -106,6 +106,22 @@ namespace HorusMod.Economy
             }
         }
 
+        public void SaveConfig()
+        {
+            try
+            {
+                if (config != null)
+                {
+                    string json = JsonUtility.ToJson(config, true);
+                    System.IO.File.WriteAllText(ConfigPath, json);
+                }
+            }
+            catch (Exception ex)
+            {
+                HorusPlugin.Logger.LogError($"[RTS Economy] Config save failed: {ex.Message}");
+            }
+        }
+
         private static RtsEconomyConfig CreateDefaultConfig()
         {
             var cfg = new RtsEconomyConfig
@@ -271,6 +287,43 @@ namespace HorusMod.Economy
 
         // ─── Faction State Access ────────────────────────────────────────────────
 
+        private Faction GetGameFaction(int factionIndex)
+        {
+            var factions = FactionRegistry.factions;
+            if (factions != null && factionIndex >= 0 && factionIndex < factions.Count)
+            {
+                return factions[factionIndex];
+            }
+            return null;
+        }
+
+        private float? GetFactionRealBudget(Faction faction)
+        {
+            if (faction == null) return null;
+            try
+            {
+                var field = typeof(Faction).GetField("budget", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.IgnoreCase);
+                if (field != null) return Convert.ToSingle(field.GetValue(faction));
+                var prop = typeof(Faction).GetProperty("budget", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.IgnoreCase);
+                if (prop != null) return Convert.ToSingle(prop.GetValue(faction));
+            }
+            catch { }
+            return null;
+        }
+
+        private void SetFactionRealBudget(Faction faction, float value)
+        {
+            if (faction == null) return;
+            try
+            {
+                var field = typeof(Faction).GetField("budget", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.IgnoreCase);
+                if (field != null) { field.SetValue(faction, Convert.ChangeType(value, field.FieldType)); return; }
+                var prop = typeof(Faction).GetProperty("budget", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.IgnoreCase);
+                if (prop != null && prop.CanWrite) { prop.SetValue(faction, Convert.ChangeType(value, prop.PropertyType)); }
+            }
+            catch { }
+        }
+
         public FactionEconomyState GetFactionState(int factionIndex)
         {
             factionStates.TryGetValue(factionIndex, out var state);
@@ -279,19 +332,48 @@ namespace HorusMod.Economy
 
         public float GetBudget(int factionIndex)
         {
+            if (HorusPlugin.SyncWithFactionBudget != null && HorusPlugin.SyncWithFactionBudget.Value)
+            {
+                float? realBudget = GetFactionRealBudget(GetGameFaction(factionIndex));
+                if (realBudget.HasValue) return realBudget.Value;
+            }
             return GetFactionState(factionIndex)?.Budget ?? 0f;
         }
 
         public void SetBudget(int factionIndex, float value)
         {
+            if (HorusPlugin.SyncWithFactionBudget != null && HorusPlugin.SyncWithFactionBudget.Value)
+            {
+                SetFactionRealBudget(GetGameFaction(factionIndex), value);
+            }
             var state = GetFactionState(factionIndex);
             if (state != null) state.Budget = Mathf.Max(0f, value);
         }
 
         public void AdjustBudget(int factionIndex, float delta)
         {
+            float current = GetBudget(factionIndex);
+            SetBudget(factionIndex, current + delta);
+        }
+
+        public void AdjustUnitCap(int factionIndex, int delta)
+        {
             var state = GetFactionState(factionIndex);
-            if (state != null) state.Budget = Mathf.Max(0f, state.Budget + delta);
+            if (state == null) return;
+            
+            state.UnitCap = Mathf.Max(0, state.UnitCap + delta);
+            
+            // update config
+            if (config != null && config.factionBudgets != null)
+            {
+                var budgetEntry = config.factionBudgets.FirstOrDefault(
+                    b => state.FactionName.StartsWith(b.factionName, StringComparison.OrdinalIgnoreCase));
+                if (budgetEntry != null)
+                {
+                    budgetEntry.unitCap = state.UnitCap;
+                    SaveConfig();
+                }
+            }
         }
 
         // ─── Transaction Pipeline ────────────────────────────────────────────────
