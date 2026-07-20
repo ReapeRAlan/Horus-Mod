@@ -97,18 +97,24 @@ namespace HorusMod.Core
             if (HorusPermissions.IsMultiplayerClient())
             {
                 GUI.color = new Color(1f, 0.4f, 0.4f);
-                GUILayout.Label("Multiplayer Client (No Spawn)");
+                GUILayout.Label("Client — View Only");
             }
             else if (HorusPermissions.IsMultiplayerHost())
             {
                 GUI.color = new Color(0.4f, 1f, 0.4f);
-                GUILayout.Label("Multiplayer Host");
+                GUILayout.Label("Local Multiplayer Host");
             }
             else
             {
                 GUI.color = new Color(0.4f, 1f, 0.4f);
                 GUILayout.Label("Single Player");
             }
+            GUILayout.EndHorizontal();
+            
+            GUILayout.BeginHorizontal();
+            GUILayout.Label("Server: ", GUILayout.Width(80));
+            GUI.color = new Color(1f, 0.6f, 0.2f);
+            GUILayout.Label("Dedicated Server — Unsupported");
             GUI.color = c;
             GUILayout.EndHorizontal();
 
@@ -155,9 +161,10 @@ namespace HorusMod.Core
             }
             else
             {
-                if (selectedFactionIndex >= factions.Count) selectedFactionIndex = 0;
-                string[] factionNames = factions.Select(f => f.factionName).ToArray();
-                selectedFactionIndex = GUILayout.SelectionGrid(selectedFactionIndex, factionNames, 2);
+                if (selectedFactionIndex > factions.Count) selectedFactionIndex = 0; // > because Count is the index for Neutral
+                List<string> factionNames = factions.Select(f => f.factionName).ToList();
+                factionNames.Add("Neutral (Unassigned)");
+                selectedFactionIndex = GUILayout.SelectionGrid(selectedFactionIndex, factionNames.ToArray(), 2);
             }
 
             GUILayout.Space(5);
@@ -515,19 +522,43 @@ namespace HorusMod.Core
         private void DrawDebugSection()
         {
             GUILayout.Label($"Horus Version: {HorusPlugin.PluginVersion}");
-            GUILayout.Label($"Spawned Units Session: {horusSpawnedUnits.Count}");
+            GUILayout.Label($"Current Mode: {HorusPermissions.GetModeLabel()}");
+            GUILayout.Label($"Current Scene: {UnityEngine.SceneManagement.SceneManager.GetActiveScene().name}");
+            GUILayout.Label($"Reload Count: {sceneReloadCount}");
+            GUILayout.Label($"Spawned Units: {horusSpawnedUnits.Count}");
             if (RtsFactoryManager.Instance != null)
                 GUILayout.Label($"Active Factories: {RtsFactoryManager.Instance.activeFactories.Count}");
+            
+            GUILayout.Label($"RTS Mode Status: {(economyManager?.CurrentMode.ToString())}");
+            bool isNeutral = FactionRegistry.factions != null && selectedFactionIndex >= FactionRegistry.factions.Count;
+            GUILayout.Label($"Neutral Mode Status: {(isNeutral ? "Active" : "Inactive")}");
+            
+            GUILayout.Label($"Last Spawn: {lastSpawnResult}");
+            GUILayout.Label($"Last Delete: {lastDeleteResult}");
+            GUILayout.Label($"Last Blocked Action: {lastBlockedAction}");
+            GUILayout.Label($"Last Lifecycle Event: {lastLifecycleEvent}");
+            
+            GUILayout.Label($"Command Executor Mode: local");
 
             if (GUILayout.Button("Print Diagnostics to Log"))
             {
                 HorusPlugin.Logger.LogInfo("--- Horus Diagnostics ---");
                 HorusPlugin.Logger.LogInfo($"Version: {HorusPlugin.PluginVersion}");
                 HorusPlugin.Logger.LogInfo($"Mode: {HorusPermissions.GetModeLabel()}");
+                HorusPlugin.Logger.LogInfo($"Current Scene: {UnityEngine.SceneManagement.SceneManager.GetActiveScene().name}");
                 HorusPlugin.Logger.LogInfo($"Economy Mode: {(economyManager?.CurrentMode.ToString())}");
                 HorusPlugin.Logger.LogInfo($"Units spawned: {horusSpawnedUnits.Count}");
+                HorusPlugin.Logger.LogInfo($"Scene reloads: {sceneReloadCount}");
+                HorusPlugin.Logger.LogInfo($"Instance ID: {horusManagerInstanceId}");
             }
             
+            if (GUILayout.Button("Reset UI"))
+            {
+                showPlacementTools = false;
+                showGroupTools = false;
+                showFactoryTools = false;
+            }
+
             if (GUILayout.Button("Reload RTS Economy Config"))
             {
                 if (economyManager != null)
@@ -545,6 +576,89 @@ namespace HorusMod.Core
                     if (SceneSingleton<GameplayUI>.i != null) SceneSingleton<GameplayUI>.i.GameMessage("Horus: Factory config reloaded.");
                 }
             }
+
+            if (GUILayout.Button("Force Refresh Game References"))
+            {
+                InitializeMissionState();
+                if (SceneSingleton<GameplayUI>.i != null) SceneSingleton<GameplayUI>.i.GameMessage("Horus: Forced game reference refresh.");
+            }
+            
+            if (GUILayout.Button("Clear Stale Horus References"))
+            {
+                int before = horusSpawnedUnits.Count;
+                horusSpawnedUnits.RemoveWhere(u => u == null);
+                int after = horusSpawnedUnits.Count;
+                HorusPlugin.Logger.LogInfo($"Cleared {before - after} stale spawned unit references.");
+                if (SceneSingleton<GameplayUI>.i != null) SceneSingleton<GameplayUI>.i.GameMessage($"Horus: Cleared {before - after} stale refs.");
+            }
+
+            if (GUILayout.Button("▶ Run Horus Self-Test"))
+            {
+                RunSelfTest();
+            }
+        }
+
+        private void RunSelfTest()
+        {
+            HorusPlugin.Logger.LogInfo("=== HORUS SELF-TEST BEGIN ===");
+            HorusPlugin.Logger.LogInfo($"  Version: {HorusPlugin.PluginVersion}");
+            HorusPlugin.Logger.LogInfo($"  Scene: {UnityEngine.SceneManagement.SceneManager.GetActiveScene().name}");
+            
+            // Instance count check
+            var allManagers = FindObjectsOfType<HorusManager>();
+            HorusPlugin.Logger.LogInfo($"  HorusManager instances: {allManagers.Length} (expected: 1)");
+            if (allManagers.Length > 1)
+                HorusPlugin.Logger.LogWarning("  WARNING: Multiple HorusManager instances detected!");
+            HorusPlugin.Logger.LogInfo($"  Instance ID: {horusManagerInstanceId}");
+            
+            // Game services
+            bool spawnerReady = Spawner.i != null;
+            bool encyclopediaReady = Encyclopedia.i != null;
+            var factions = FactionRegistry.factions;
+            bool factionsReady = factions != null && factions.Count > 0;
+            int factionCount = factions?.Count ?? 0;
+            HorusPlugin.Logger.LogInfo($"  Spawner.i: {(spawnerReady ? "READY" : "NOT READY")}");
+            HorusPlugin.Logger.LogInfo($"  Encyclopedia.i: {(encyclopediaReady ? "READY" : "NOT READY")}");
+            HorusPlugin.Logger.LogInfo($"  FactionRegistry: {(factionsReady ? $"READY ({factionCount} factions)" : "NOT READY")}");
+            HorusPlugin.Logger.LogInfo($"  GameManager.gameState: {GameManager.gameState}");
+            
+            // Selected faction / unit validity
+            bool isNeutral = factionsReady && selectedFactionIndex >= factionCount;
+            bool factionValid = factionsReady && (selectedFactionIndex < factionCount || isNeutral);
+            HorusPlugin.Logger.LogInfo($"  Selected faction index: {selectedFactionIndex} (valid={factionValid}, neutral={isNeutral})");
+            
+            UnitDefinition selectedDef = GetSelectedDefinition();
+            HorusPlugin.Logger.LogInfo($"  Selected unit: {(selectedDef != null ? selectedDef.unitName : "NONE")}");
+            
+            // Economy / Factory
+            bool economyReady = economyManager != null;
+            bool factoryReady = RtsFactoryManager.Instance != null;
+            HorusPlugin.Logger.LogInfo($"  RtsEconomyManager: {(economyReady ? $"READY (mode={economyManager.CurrentMode})" : "NOT READY")}");
+            HorusPlugin.Logger.LogInfo($"  RtsFactoryManager: {(factoryReady ? $"READY ({RtsFactoryManager.Instance.activeFactories.Count} factories)" : "NOT READY")}");
+            
+            // Command executor
+            HorusPlugin.Logger.LogInfo($"  Command executor: stub (v1.3.0 architecture, not wired)");
+            
+            // Neutral support
+            HorusPlugin.Logger.LogInfo($"  Neutral spawn support: experimental (hq=null, may not work for all unit types)");
+            
+            // Dedicated bridge
+            bool bridgeEnabled = HorusPlugin.DedicatedServerBridgeEnabled?.Value ?? false;
+            HorusPlugin.Logger.LogInfo($"  Dedicated server bridge: {(bridgeEnabled ? "ENABLED (WARNING)" : "disabled")}");
+            
+            // Lifecycle
+            HorusPlugin.Logger.LogInfo($"  Scene reload count: {sceneReloadCount}");
+            HorusPlugin.Logger.LogInfo($"  Scene loaded subscriptions: {sceneLoadedSubscriptions}");
+            HorusPlugin.Logger.LogInfo($"  Scene unloaded subscriptions: {sceneUnloadedSubscriptions}");
+            HorusPlugin.Logger.LogInfo($"  Last lifecycle event: {lastLifecycleEvent}");
+            HorusPlugin.Logger.LogInfo($"  Last spawn result: {lastSpawnResult}");
+            HorusPlugin.Logger.LogInfo($"  Last delete result: {lastDeleteResult}");
+            HorusPlugin.Logger.LogInfo($"  Spawned units tracked: {horusSpawnedUnits.Count}");
+            
+            HorusPlugin.Logger.LogInfo("=== HORUS SELF-TEST END ===");
+            
+            if (SceneSingleton<GameplayUI>.i != null) 
+                SceneSingleton<GameplayUI>.i.GameMessage("Horus: Self-test complete. Check BepInEx log.");
         }
         /// <summary>
         /// Draws the detailed RTS Commander Mode panel with budgets, income, caps,

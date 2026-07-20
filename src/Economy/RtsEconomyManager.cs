@@ -201,6 +201,15 @@ namespace HorusMod.Economy
             RtsFactoryManager.Instance?.ResetMatchFactories();
         }
 
+        /// <summary>
+        /// Fully clears all runtime state during a mission unload.
+        /// </summary>
+        public void ResetRuntimeState()
+        {
+            ResetMatch();
+            // Additionally clear any dangling instance-level refs if needed
+        }
+
         // ─── Tick (called from HorusManager.Update) ─────────────────────────────
 
         public void Tick()
@@ -306,8 +315,13 @@ namespace HorusMod.Economy
                 if (field != null) return Convert.ToSingle(field.GetValue(faction));
                 var prop = typeof(Faction).GetProperty("budget", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.IgnoreCase);
                 if (prop != null) return Convert.ToSingle(prop.GetValue(faction));
+                
+                HorusPlugin.Logger.LogWarning($"[RTS Economy] SyncWithFactionBudget failed: could not find 'budget' on Faction {faction.factionName}");
             }
-            catch { }
+            catch (Exception ex)
+            {
+                HorusPlugin.Logger.LogWarning($"[RTS Economy] SyncWithFactionBudget exception for {faction.factionName}: {ex.Message}");
+            }
             return null;
         }
 
@@ -319,9 +333,14 @@ namespace HorusMod.Economy
                 var field = typeof(Faction).GetField("budget", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.IgnoreCase);
                 if (field != null) { field.SetValue(faction, Convert.ChangeType(value, field.FieldType)); return; }
                 var prop = typeof(Faction).GetProperty("budget", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.IgnoreCase);
-                if (prop != null && prop.CanWrite) { prop.SetValue(faction, Convert.ChangeType(value, prop.PropertyType)); }
+                if (prop != null && prop.CanWrite) { prop.SetValue(faction, Convert.ChangeType(value, prop.PropertyType)); return; }
+
+                HorusPlugin.Logger.LogWarning($"[RTS Economy] SetFactionRealBudget failed: could not find writable 'budget' on Faction {faction.factionName}");
             }
-            catch { }
+            catch (Exception ex)
+            {
+                HorusPlugin.Logger.LogWarning($"[RTS Economy] SetFactionRealBudget exception for {faction.factionName}: {ex.Message}");
+            }
         }
 
         public FactionEconomyState GetFactionState(int factionIndex)

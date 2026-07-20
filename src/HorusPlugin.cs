@@ -53,6 +53,13 @@ namespace HorusMod
         public static ConfigEntry<bool> EnableStrictBaseDeployment { get; private set; }
         public static ConfigEntry<float> BaseDeploymentRadius { get; private set; }
 
+        // Dedicated Server / MVP Networking Stubs
+        public static ConfigEntry<bool> DedicatedServerBridgeEnabled { get; private set; }
+        public static ConfigEntry<string> BindAddress { get; private set; }
+        public static ConfigEntry<int> Port { get; private set; }
+        public static ConfigEntry<string> AuthenticationToken { get; private set; }
+        public static ConfigEntry<int> RateLimitPerSecond { get; private set; }
+
         private void Awake()
         {
             Logger = base.Logger;
@@ -109,6 +116,13 @@ namespace HorusMod
             SyncWithFactionBudget = Config.Bind("RTS", "SyncWithFactionBudget", false, "If true, the RTS budget is synced with the actual in-game faction budget instead of local Horus budget.");
             EnableStrictBaseDeployment = Config.Bind("RTS", "EnableStrictBaseDeployment", false, "If true, units can only be deployed within BaseDeploymentRadius of a friendly building/carrier.");
             BaseDeploymentRadius = Config.Bind("RTS", "BaseDeploymentRadius", 3000f, "Radius in meters for strict base deployment restriction.");
+
+            // Dedicated Server / Networking Configs
+            DedicatedServerBridgeEnabled = Config.Bind("Server", "DedicatedServerBridgeEnabled", false, "STUB: Enable dedicated server bridge.");
+            BindAddress = Config.Bind("Server", "BindAddress", "127.0.0.1", "STUB: Bind address for dedicated server network bridge.");
+            Port = Config.Bind("Server", "Port", 7780, "STUB: Port for dedicated server network bridge.");
+            AuthenticationToken = Config.Bind("Server", "AuthenticationToken", "", "STUB: Authentication token to restrict access.");
+            RateLimitPerSecond = Config.Bind("Server", "RateLimitPerSecond", 5, "STUB: Rate limit for command execution.");
 
             try
             {

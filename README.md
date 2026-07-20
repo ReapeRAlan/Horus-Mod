@@ -24,7 +24,8 @@ A Game Master/Free Camera utility mod for Nuclear Option (formerly known as Zeus
 - **Spawn Stationary**: option to set ground vehicles/ships to hold position on spawn (applies to both single and group spawns).
 - **RTS / Budget Mode**: Real-Time Strategy economy mode. Spawning units/groups costs faction budget, tracking Primeva and Boscali budgets independently. Spawning is blocked on insufficient budget. Includes manual budget adjustments (host-only) in the UI. Loads costs and passive income from `BepInEx/config/HorusMod/rts_economy.json` (auto-created on startup with default values).
 - **RTS Factories & Production**: host-created visible factory buildings that generate income, loop production queues, use type-correct spawn rules, support rally points, and persist to JSON.
-- **Host-authoritative multiplayer**: clients are blocked by default and the UI shows the current permission status. All spawn, delete, and budget modifications are validated server-side.
+- **Host-authoritative multiplayer**: clients are blocked by default and the UI shows the current permission status. Normal players do not need the mod installed, and if they do, they are locked to view-only mode. All spawn, delete, and budget modifications are validated server-side.
+- **Dedicated server support**: Dedicated server support is being prepared architecturally, but is not officially supported yet.
 - **Camera/Control Restore**: saves and restores aircraft control and camera view states. Temporarily suspends flight controls during Horus Mode to avoid input fighting.
 
 ## Installation
@@ -114,10 +115,14 @@ Factories, bases, or carriers automatically generate income and produce units ov
 - **Multiplayer Safety**: Creation, deletion, editing, queue updates, production ticks, budget changes, save/load, reload, and reset actions are restricted to Single Player or Multiplayer Host. Clients can view safe UI state and see Host-only indicators.
 
 ### Multiplayer Permissions
-Horus is host-authoritative. The UI shows your current mode:
+Horus is host-authoritative. Normal players do not need Horus Mod installed to play on a server hosted by a Game Master using Horus Mod. 
+
+If you do have Horus installed, the UI shows your current mode:
 - **Single Player** — full access.
 - **Multiplayer Host** — full access.
-- **Multiplayer Client - No Permission** — spawning, deleting, and budget adjustments are blocked by default.
+- **Client (View Only)** — spawning, deleting, and budget adjustments are blocked by default.
+
+*Note for future v1.3.0 Dedicated Server architecture: A separate Horus Server plugin will be used on headless servers, while authorized Game Masters will use the Horus client plugin to manage the game. Normal players will still require no installation.*
 
 Client request/whitelist support is reserved for a future update (config flags `AllowClientHorusRequests` and `EnableExperimentalWhitelist`, both off by default).
 

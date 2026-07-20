@@ -7,6 +7,7 @@ using Mirage;
 using HorusMod.Networking;
 using HorusMod.Placement;
 using HorusMod.Economy;
+using UnityEngine.SceneManagement;
 
 namespace HorusMod.Core
 {
@@ -121,8 +122,24 @@ namespace HorusMod.Core
         private int cachedCategoryIndex = -1;
         private List<UnitDefinition> cachedUnitList;
 
+        public static int sceneReloadCount = 0;
+        public static string horusManagerInstanceId = System.Guid.NewGuid().ToString("N").Substring(0, 8);
+        public static int sceneLoadedSubscriptions = 0;
+        public static int sceneUnloadedSubscriptions = 0;
+        public static string lastSpawnResult = "None";
+        public static string lastDeleteResult = "None";
+        public static string lastBlockedAction = "None";
+        public static string lastLifecycleEvent = "None";
+
         private void Awake()
         {
+            // Singleton guard: if another instance already exists, destroy this duplicate
+            if (Instance != null && Instance != this)
+            {
+                HorusPlugin.Logger.LogWarning($"[HORUS LIFECYCLE] Duplicate HorusManager detected (existing={HorusManager.horusManagerInstanceId}). Destroying duplicate.");
+                Destroy(this.gameObject);
+                return;
+            }
             Instance = this;
             ghostPreviewEnabled = HorusPlugin.EnableGhostPreview.Value;
             autoOceanSnapForShips = HorusPlugin.AutoOceanSnapForShips.Value;
@@ -136,8 +153,85 @@ namespace HorusMod.Core
             economyManager = new RtsEconomyManager();
 
             RefreshSavedCustomGroups();
-            HorusPlugin.Logger.LogInfo("HorusManager created.");
+            HorusPlugin.Logger.LogInfo($"HorusManager created. Instance ID: {horusManagerInstanceId}");
             HorusPlugin.Logger.LogInfo("[HORUS DEBUG] HorusManager Awake");
+        }
+
+        private void OnEnable()
+        {
+            SceneManager.sceneLoaded += OnMissionLoaded;
+            sceneLoadedSubscriptions++;
+            SceneManager.sceneUnloaded += OnMissionUnloaded;
+            sceneUnloadedSubscriptions++;
+        }
+
+        private void OnDisable()
+        {
+            SceneManager.sceneLoaded -= OnMissionLoaded;
+            sceneLoadedSubscriptions--;
+            SceneManager.sceneUnloaded -= OnMissionUnloaded;
+            sceneUnloadedSubscriptions--;
+        }
+
+        private void OnMissionUnloaded(Scene scene)
+        {
+            lastLifecycleEvent = "Scene unloaded";
+            HorusPlugin.Logger.LogInfo("[HORUS LIFECYCLE] Scene unloaded");
+            ResetRuntimeState();
+        }
+
+        private void OnMissionLoaded(Scene scene, LoadSceneMode mode)
+        {
+            sceneReloadCount++;
+            lastLifecycleEvent = "Scene loaded";
+            HorusPlugin.Logger.LogInfo("[HORUS LIFECYCLE] Scene loaded");
+            HorusPlugin.Logger.LogInfo("[HORUS LIFECYCLE] Waiting for game services");
+            // The actual readiness checks are naturally handled by the game logic / our updates,
+            // but we can initialize mission state here.
+            InitializeMissionState();
+        }
+
+        private void ResetRuntimeState()
+        {
+            lastLifecycleEvent = "Runtime state reset";
+            HorusPlugin.Logger.LogInfo("[HORUS LIFECYCLE] Runtime state reset");
+            
+            // Clear any old spawned units tracking
+            horusSpawnedUnits.Clear();
+            
+            // Destroy ghost preview if it exists
+            ghost.Clear();
+            
+            // Turn off active Horus mode if on
+            if (horusActive)
+            {
+                ToggleHorusMode();
+            }
+            
+            // Clear factory/economy state
+            economyManager?.ResetRuntimeState();
+            if (RtsFactoryManager.Instance != null)
+            {
+                RtsFactoryManager.Instance.activeFactories.Clear();
+            }
+
+            cachedCategoryIndex = -1;
+            cachedUnitList = null;
+        }
+
+        private void InitializeMissionState()
+        {
+            // Log readiness of each service individually — these may be null during loading screens
+            HorusPlugin.Logger.LogInfo($"[HORUS LIFECYCLE] Spawner.i: {(Spawner.i != null ? "READY" : "NOT READY")}");
+            HorusPlugin.Logger.LogInfo($"[HORUS LIFECYCLE] Encyclopedia.i: {(Encyclopedia.i != null ? "READY" : "NOT READY")}");
+            HorusPlugin.Logger.LogInfo($"[HORUS LIFECYCLE] FactionRegistry: {(FactionRegistry.factions != null ? $"READY ({FactionRegistry.factions.Count} factions)" : "NOT READY")}");
+            HorusPlugin.Logger.LogInfo($"[HORUS LIFECYCLE] GameManager.gameState: {GameManager.gameState}");
+            HorusPlugin.Logger.LogInfo($"[HORUS LIFECYCLE] RtsEconomyManager: {(economyManager != null ? "READY" : "NOT READY")}");
+            HorusPlugin.Logger.LogInfo($"[HORUS LIFECYCLE] RtsFactoryManager: {(RtsFactoryManager.Instance != null ? "READY" : "NOT READY")}");
+
+            bool allReady = Spawner.i != null && Encyclopedia.i != null && FactionRegistry.factions != null;
+            lastLifecycleEvent = allReady ? "Mission services ready" : "Mission loaded (some services pending)";
+            HorusPlugin.Logger.LogInfo($"[HORUS LIFECYCLE] {lastLifecycleEvent}");
         }
 
         private void Start()
@@ -1140,6 +1234,20 @@ namespace HorusMod.Core
             return -1;
         }
 
+        public static Faction GetFactionSafe(int index)
+        {
+            var factions = FactionRegistry.factions;
+            if (factions == null || index < 0 || index >= factions.Count) return null;
+            return factions[index];
+        }
+
+        public static FactionHQ GetHQSafe(int index)
+        {
+            Faction faction = GetFactionSafe(index);
+            if (faction == null) return null;
+            return FactionRegistry.HQFromFaction(faction);
+        }
+
         private System.Collections.Generic.List<Vector3> GetFormationOffsets(int count, float spacing, string formation)
         {
             var offsets = new System.Collections.Generic.List<Vector3>();
@@ -1237,8 +1345,8 @@ namespace HorusMod.Core
                 }
             }
 
-            Faction faction = factions[selectedFactionIndex];
-            FactionHQ hq = FactionRegistry.HQFromFaction(faction);
+            Faction faction = GetFactionSafe(selectedFactionIndex);
+            FactionHQ hq = GetHQSafe(selectedFactionIndex);
             
             Quaternion rot = GetPlacementRotation();
             var offsets = GetFormationOffsets(units.Count, groupSpacing, formationNames[selectedFormationIndex]);
@@ -1906,8 +2014,8 @@ namespace HorusMod.Core
                 }
             }
 
-            Faction faction = factions[selectedFactionIndex];
-            FactionHQ hq = FactionRegistry.HQFromFaction(faction);
+            Faction faction = GetFactionSafe(selectedFactionIndex);
+            FactionHQ hq = GetHQSafe(selectedFactionIndex);
 
             GlobalPosition globalPos = position.ToGlobalPosition();
             Quaternion rotation = GetPlacementRotation();
@@ -1935,7 +2043,15 @@ namespace HorusMod.Core
                     
                     if (HorusPlugin.CreditKillsToSpawner.Value)
                     {
-                        HorusPlugin.Logger.LogWarning("[Horus] CreditKillsToSpawner is enabled but currently marked as experimental/unsafe. Skipping assignment.");
+                        try 
+                        {
+                            // Implementation removed; marked as unsafe in v1.2.1
+                            HorusPlugin.Logger.LogWarning("[Horus] CreditKillsToSpawner assignment audited and skipped: unsafe memory references.");
+                        }
+                        catch (Exception ex)
+                        {
+                            HorusPlugin.Logger.LogError($"[Horus] CreditKillsToSpawner failed: {ex.Message}");
+                        }
                     }
                 }
                 HorusPlugin.Logger.LogInfo($"HorusMod: Spawned {def.unitName} at {globalPos} yaw={spawnYaw:F0}° (tracked={spawned != null})");

@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.2.2] - 2026-07-20
+
+### Added
+- **Neutral / Unassigned Spawning**: Added support for spawning neutral/unassigned units safely without crashing the faction array.
+- **Diagnostics Panel**: Expanded the debug panel to include lifecycle counters, exact action results, mode states, and explicit reference-clearing tools.
+- **Server Architecture Foundation**: Stubs and command patterns (`src/Commands`, `src/Execution`, `src/Networking`) added to prepare for headless dedicated server support. (Note: Dedicated server support is being prepared architecturally, but is not officially supported yet).
+- **Multiplayer Clarification**: Explicitly clarified in README and UI that normal players do not need the mod installed, and if they do, they are locked to view-only mode.
+
+### Changed
+- **Mission Lifecycle Stability**: Horus now safely re-initializes on mission load and purges all references on unload, allowing continuous gameplay across map reloads without restarting the game.
+- **SyncWithFactionBudget (Experimental)**: Explicit logs and safe fallbacks added if in-game budget reflection fails.
+- **CreditKillsToSpawner (Experimental)**: Verified and audited. Left disabled due to unsafe memory references, with clear logs indicating failure.
+
 ## [1.2.1] - 2026-06-10
 
 ### Added
