@@ -23,6 +23,7 @@ namespace HorusMod.Interaction
         private float rmbDownTime;
         private bool rmbLookEngaged;
         private bool rmbStartedOverGui;
+        private bool rmbTracking;
         private Vector2 lmbDownPos;
         private Unit lmbDownUnit;
         private bool lmbTracking;
@@ -59,11 +60,7 @@ namespace HorusMod.Interaction
             HandleEmergencyAndShortcuts(mapOpen);
             if (mapOpen)
             {
-                if (rmbLookEngaged)
-                {
-                    rmbLookEngaged = false;
-                    owner.SetHorusCursorLock(false);
-                }
+                CancelPointerCapture();
                 // DynamicMap is itself a Unity UI surface, so EventSystem reports it as
                 // "pointer over UI". Only Horus-owned chrome should block map commands.
                 UpdateMap(overHorusUi);
@@ -83,6 +80,12 @@ namespace HorusMod.Interaction
             }
 
             UpdateRightMouse(overGui);
+            if (rmbLookEngaged && !Input.GetMouseButton(1) && !Input.GetMouseButtonUp(1))
+            {
+                // Focus changes can swallow MouseUp. Never let a stale drag keep the
+                // game cursor locked after the physical button has been released.
+                CancelPointerCapture();
+            }
             owner.UpdateFreeCamera(rmbLookEngaged);
 
             if (!overGui && !rmbLookEngaged)
@@ -96,10 +99,17 @@ namespace HorusMod.Interaction
 
         public void Deactivate()
         {
-            rmbLookEngaged = false;
+            CancelPointerCapture();
             lmbTracking = false;
             MarqueeActive = false;
             HorusContextMenu.Close();
+        }
+
+        public void CancelPointerCapture()
+        {
+            rmbTracking = false;
+            rmbLookEngaged = false;
+            rmbStartedOverGui = false;
             owner.SetHorusCursorLock(false);
         }
 
@@ -188,8 +198,9 @@ namespace HorusMod.Interaction
                 rmbDownTime = Time.unscaledTime;
                 rmbStartedOverGui = overGui;
                 rmbLookEngaged = false;
+                rmbTracking = true;
             }
-            else if (Input.GetMouseButton(1) && !rmbLookEngaged && !rmbStartedOverGui)
+            else if (rmbTracking && Input.GetMouseButton(1) && !rmbLookEngaged && !rmbStartedOverGui)
             {
                 bool moved = ((Vector2)Input.mousePosition - rmbDownPos).sqrMagnitude > ClickMaxPixels * ClickMaxPixels;
                 bool holding = Time.unscaledTime - rmbDownTime > RmbClickMaxSeconds;
@@ -199,7 +210,7 @@ namespace HorusMod.Interaction
                     owner.SetHorusCursorLock(true);
                 }
             }
-            else if (Input.GetMouseButtonUp(1))
+            else if (rmbTracking && Input.GetMouseButtonUp(1))
             {
                 if (rmbLookEngaged)
                 {
@@ -207,9 +218,13 @@ namespace HorusMod.Interaction
                 }
                 else if (!overGui && !rmbStartedOverGui)
                 {
-                    OnRightClick(Pick);
+                    WorldPick releasedPick = WorldPick.FromScreen(rmbDownPos);
+                    releasedPick = WorldPick.WithScreenUnitFallback(releasedPick, rmbDownPos);
+                    OnRightClick(releasedPick);
                 }
+                rmbTracking = false;
                 rmbLookEngaged = false;
+                rmbStartedOverGui = false;
             }
         }
 

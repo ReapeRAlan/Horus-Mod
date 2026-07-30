@@ -37,8 +37,7 @@ namespace HorusMod.Interaction
                 for (int i = 0; i < units.Count && i < destinations.Count; i++)
                 {
                     Unit unit = units[i];
-                    if (unit is ICommandable commandable && commandable.UnitCommand != null)
-                        commandable.UnitCommand.SetDestination(destinations[i], playerCommand: false);
+                    HorusOrders.TrySetDestination(unit, destinations[i], playerCommand: false, out _);
                 }
             }
         }

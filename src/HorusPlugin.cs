@@ -14,7 +14,7 @@ namespace HorusMod
     {
         public const string PluginGuid = "com.reaperalan.horusmod";
         public const string PluginName = "Horus Mod Starter";
-        public const string PluginVersion = "1.2.3";
+        public const string PluginVersion = "1.2.4";
 
         public static new ManualLogSource Logger { get; private set; }
         public static ConfigEntry<KeyCode> HotkeyToggleMode { get; private set; }

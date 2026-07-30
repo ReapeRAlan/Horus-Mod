@@ -5,5 +5,5 @@ Copy-Item "README.md" -Destination dist\temp\README.md -Force
 Copy-Item "CHANGELOG.md" -Destination dist\temp\CHANGELOG.md -Force
 New-Item -ItemType Directory -Path dist\temp\docs -Force
 Copy-Item "docs\BepInEx.dev.cfg" -Destination dist\temp\docs\BepInEx.dev.cfg -Force
-Compress-Archive -Path dist\temp\* -DestinationPath dist\Horus_Mod_Starter_v1.2.3.zip -Force
+Compress-Archive -Path dist\temp\* -DestinationPath dist\Horus_Mod_Starter_v1.2.4.zip -Force
 Remove-Item -Recurse -Force dist\temp -ErrorAction Ignore

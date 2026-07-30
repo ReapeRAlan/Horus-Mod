@@ -1,6 +1,26 @@
 # Changelog
 
-## [1.2.3] - Unreleased
+## [1.2.4] - 2026-07-30
+
+### Added
+- Server-side move, hold, clear, formation, undo/redo, and factory rally orders for AI aircraft through the native autopilot.
+- Direct loadout, skin/livery, and pilot-skill editing for selected aircraft in the Manage tab.
+- Factory runtime status text for invalid faction, anchor, queue, cap, budget, timer, spawn, and production results.
+
+### Fixed
+- Cursor ownership is now captured and restored exactly; focus loss, missed RMB release, scene unload, disabling, and destruction cannot leave Horus holding the cursor.
+- Horus can always deactivate during mission unload after the game has already switched to the Menu state.
+- RMB unit picking now preserves ship hits through the water plane and adds a screen-space unit fallback; context menus render above the editor window.
+- Factory creation rejects Neutral or missing-HQ factions without indexing outside the faction list.
+- Incomplete economy and factory JSON files are migrated, filled with working defaults, and persisted.
+- Default production queues and the Mixed factory preset are restored when absent.
+- Factory rally points now issue real ground, naval, or air movement orders.
+- Ship destinations are normalized to sea level before native sea-lane pathfinding.
+- Entering RTS mode while Neutral is selected now chooses the first playable faction.
+- Aircraft loadout/skin controls auto-open when an aircraft is armed, and post-spawn editing is available without the context menu.
+- The diagnostics instance count includes the persistent hidden Horus manager instead of reporting a false zero.
+
+## [1.2.3] - 2026-07-30
 
 ### Added
 - Themed, resizable and persistent tabbed editor with cached IMGUI styles.

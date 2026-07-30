@@ -12,6 +12,7 @@ using HorusMod.Logging;
 using HorusMod.UI;
 using HorusMod.Data;
 using HorusMod.Compat;
+using HorusMod.Interaction;
 
 namespace HorusMod.Core
 {
@@ -31,9 +32,9 @@ namespace HorusMod.Core
         internal void DrawPlaceConfiguration()
         {
             GUILayout.Space(4f);
-            if (Section("Placement", ref showPlacementTools)) DrawPlacementToolsSection();
-            if (ArmedDefinition is AircraftDefinition && Section("Aircraft options", ref showAircraftCustomizationTools))
+            if (ArmedDefinition is AircraftDefinition && Section("Aircraft loadout, skin & pilot", ref showAircraftCustomizationTools))
                 DrawAircraftCustomizationSection();
+            if (Section("Placement", ref showPlacementTools)) DrawPlacementToolsSection();
             if (Section("Groups & formations", ref showGroupTools)) DrawGroupsSection();
         }
 
@@ -51,6 +52,7 @@ namespace HorusMod.Core
                 foreach (Unit unit in WorldSelection.Units)
                     if (unit != null) GUILayout.Label($"• {unit.unitName}", HorusTheme.LabelSmall);
             GUILayout.Space(8f);
+            DrawSelectedAircraftEditor();
             GUILayout.Label("DANGER ZONE", HorusTheme.TitleText);
             DrawSafeDeleteSection();
         }
@@ -146,6 +148,12 @@ namespace HorusMod.Core
             {
                 if (newMode == 1)
                 {
+                    int factionCount = FactionRegistry.factions?.Count ?? 0;
+                    if (selectedFactionIndex < 0 || selectedFactionIndex >= factionCount)
+                    {
+                        selectedFactionIndex = 0;
+                        HorusToasts.Show("RTS mode selected the first playable faction");
+                    }
                     economyManager.CurrentMode = HorusMode.RtsCommander;
                     economyManager.InitializeMatch();
                     HorusLog.Info("UI", "[RTS Economy] Switched to RTS Commander Mode.");
@@ -540,6 +548,85 @@ namespace HorusMod.Core
             applyCustomizationToGroups = GUILayout.Toggle(applyCustomizationToGroups, "Apply customization to group spawns");
         }
 
+        private void DrawSelectedAircraftEditor()
+        {
+            if (WorldSelection == null || !WorldSelection.HasSelection) return;
+            Aircraft first = WorldSelection.Units[0] as Aircraft;
+            if (first == null) return;
+
+            for (int i = 1; i < WorldSelection.Units.Count; i++)
+            {
+                if (!(WorldSelection.Units[i] is Aircraft aircraft) || aircraft.definition != first.definition)
+                {
+                    GUILayout.Space(8f);
+                    GUILayout.Label("AIRCRAFT LOADOUT & SKIN", HorusTheme.TitleText);
+                    GUILayout.Label("Select aircraft of the same type to edit them together.", HorusTheme.LabelMuted);
+                    return;
+                }
+            }
+
+            AircraftParameters parameters = (first.definition as AircraftDefinition)?.aircraftParameters;
+            if (parameters == null) return;
+            EnsureAircraftOptionNames(parameters);
+
+            GUILayout.Space(8f);
+            GUILayout.Label("AIRCRAFT LOADOUT & SKIN", HorusTheme.TitleText);
+            GUILayout.Label($"Editing {WorldSelection.Count} selected aircraft. You can also right-click an aircraft.", HorusTheme.LabelMuted);
+
+            bool allowed = HorusPermissions.CanSpawn();
+            bool previousEnabled = GUI.enabled;
+            GUI.enabled = previousEnabled && allowed;
+
+            if (parameters.StandardLoadouts != null && parameters.StandardLoadouts.Length > 0)
+            {
+                selectedStandardLoadoutIndex = Mathf.Clamp(selectedStandardLoadoutIndex, 0, parameters.StandardLoadouts.Length - 1);
+                GUILayout.Label("Loadout preset");
+                selectedStandardLoadoutIndex = GUILayout.SelectionGrid(selectedStandardLoadoutIndex, cachedLoadoutNames, 1);
+                if (GUILayout.Button($"Apply loadout: {cachedLoadoutNames[selectedStandardLoadoutIndex]}"))
+                {
+                    int changed = 0;
+                    foreach (Unit unit in WorldSelection.Units)
+                        if (HorusUnitEditor.TrySetLoadout((Aircraft)unit, selectedStandardLoadoutIndex)) changed++;
+                    HorusToasts.Show($"Loadout applied to {changed} aircraft");
+                }
+            }
+            else
+            {
+                GUILayout.Label("This aircraft has no standard loadout presets.", HorusTheme.LabelMuted);
+            }
+
+            if (parameters.liveries != null && parameters.liveries.Count > 0)
+            {
+                GUILayout.Space(5f);
+                selectedLiveryIndex = Mathf.Clamp(selectedLiveryIndex, 0, parameters.liveries.Count - 1);
+                GUILayout.Label("Skin / livery");
+                selectedLiveryIndex = GUILayout.SelectionGrid(selectedLiveryIndex, cachedLiveryNames, 1);
+                if (GUILayout.Button($"Apply skin: {cachedLiveryNames[selectedLiveryIndex]}"))
+                {
+                    int changed = 0;
+                    foreach (Unit unit in WorldSelection.Units)
+                        if (HorusUnitEditor.TrySetLivery((Aircraft)unit, selectedLiveryIndex)) changed++;
+                    HorusToasts.Show($"Skin applied to {changed} aircraft");
+                }
+            }
+            else
+            {
+                GUILayout.Label("This aircraft has no alternate skins / liveries.", HorusTheme.LabelMuted);
+            }
+
+            GUILayout.Space(5f);
+            GUILayout.Label($"Pilot skill: {selectedAircraftSkill:P0}");
+            selectedAircraftSkill = GUILayout.HorizontalSlider(selectedAircraftSkill, 0f, 1f);
+            if (GUILayout.Button("Apply pilot skill"))
+            {
+                foreach (Unit unit in WorldSelection.Units)
+                    HorusUnitEditor.SetSkill(unit, selectedAircraftSkill);
+                HorusToasts.Show($"Pilot skill applied to {WorldSelection.Count} aircraft");
+            }
+            GUI.enabled = previousEnabled;
+            if (!allowed) GUILayout.Label("Host only: editing is disabled for multiplayer clients.", HorusTheme.LabelMuted);
+        }
+
         private void EnsureAircraftOptionNames(AircraftParameters parameters)
         {
             int liveryCount = parameters?.liveries?.Count ?? 0;
@@ -708,7 +795,7 @@ namespace HorusMod.Core
             HorusLog.Info("UI", $"  Scene: {UnityEngine.SceneManagement.SceneManager.GetActiveScene().name}");
             
             // Instance count check
-            var allManagers = FindObjectsOfType<HorusManager>();
+            var allManagers = Resources.FindObjectsOfTypeAll<HorusManager>();
             HorusLog.Info("UI", $"  HorusManager instances: {allManagers.Length} (expected: 1)");
             if (allManagers.Length > 1)
                 HorusLog.Warning("UI", "  WARNING: Multiple HorusManager instances detected!");

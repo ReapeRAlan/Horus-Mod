@@ -9,6 +9,8 @@ using Mirage;
 using HorusMod.Core;
 using HorusMod.Networking;
 using HorusMod.Logging;
+using HorusMod.UI;
+using HorusMod.Interaction;
 
 namespace HorusMod.Economy
 {
@@ -147,21 +149,34 @@ namespace HorusMod.Economy
         private void ProcessFactoryProduction(RtsFactory factory, RtsEconomyManager economyManager)
         {
             if (factory == null) return;
+            if (!CanUseFactoryFaction(factory.factionId, out string factionReason))
+            {
+                factory.lastStatus = factionReason;
+                LogBlocked(factory, "production-faction", $"[HORUS RTS] Factory production blocked: {factionReason}");
+                return;
+            }
             if (!factory.enabled)
             {
+                factory.lastStatus = "Factory disabled";
                 LogBlocked(factory, "production-disabled", "[HORUS RTS] Factory production skipped: factory disabled");
                 return;
             }
-            if (!factory.produceUnits) return;
+            if (!factory.produceUnits)
+            {
+                factory.lastStatus = "Production disabled";
+                return;
+            }
 
             if (!IsFactoryAnchorOperational(factory, true, out string anchorReason))
             {
+                factory.lastStatus = anchorReason;
                 LogBlocked(factory, "production-anchor", $"[HORUS RTS] Factory production skipped: {anchorReason}");
                 return;
             }
 
             if (factory.productionUnitKeys == null || factory.productionUnitKeys.Count == 0)
             {
+                factory.lastStatus = "Production queue empty";
                 LogBlocked(factory, "production-empty-queue", "[HORUS RTS] Factory production blocked: production queue empty");
                 return;
             }
@@ -170,6 +185,7 @@ namespace HorusMod.Economy
 
             if (factory.maxActiveProducedUnits > 0 && factory.activeProducedUnits.Count >= factory.maxActiveProducedUnits)
             {
+                factory.lastStatus = $"Active unit cap reached ({factory.activeProducedUnits.Count}/{factory.maxActiveProducedUnits})";
                 LogBlocked(factory, "production-cap", "[HORUS RTS] Factory production blocked: active unit cap reached");
                 return;
             }
@@ -183,6 +199,7 @@ namespace HorusMod.Economy
             UnitDefinition def = ResolveProductionDefinition(factory, nextKey);
             if (def == null)
             {
+                factory.lastStatus = $"Unit not found: {nextKey}";
                 LogBlocked(factory, "production-missing-unit", $"[HORUS RTS] Factory production blocked: missing production unit '{nextKey}'");
                 AdvanceQueue(factory);
                 return;
@@ -195,6 +212,7 @@ namespace HorusMod.Economy
                 float currentBudget = economyManager.GetBudget(factory.factionId);
                 if (currentBudget < cost)
                 {
+                    factory.lastStatus = $"Insufficient budget ({currentBudget:F0}/{cost:F0})";
                     LogBlocked(factory, "production-budget", "[HORUS RTS] Factory production blocked: insufficient budget");
                     return;
                 }
@@ -202,12 +220,17 @@ namespace HorusMod.Economy
 
             factory.productionTimer += Time.deltaTime;
             float interval = Mathf.Max(1f, factory.productionIntervalSeconds);
-            if (factory.productionTimer < interval) return;
+            if (factory.productionTimer < interval)
+            {
+                factory.lastStatus = $"Building {def.unitName}: {factory.productionTimer:F0}/{interval:F0}s";
+                return;
+            }
 
             factory.productionTimer = 0f;
             Unit spawned = SpawnFactoryUnit(factory, def);
             if (spawned == null)
             {
+                factory.lastStatus = $"Spawn failed: {def.unitName}";
                 HorusLog.Error("Factory", $"[HORUS RTS] Factory production failed: failed spawn for '{def.unitName}' from {factory.displayName}");
                 return;
             }
@@ -227,6 +250,7 @@ namespace HorusMod.Economy
             }
 
             float remainingBudget = economyManager.GetBudget(factory.factionId);
+            factory.lastStatus = $"Produced {def.unitName}";
             HorusLog.Info("Factory", $"[HORUS RTS] Factory produced: {def.unitName} cost={cost:F0} remaining={remainingBudget:F0}");
             AdvanceQueue(factory);
         }
@@ -709,7 +733,11 @@ namespace HorusMod.Economy
             if (spawned != null && factory.useRallyPoint)
             {
                 FaceUnitTowardRallyPoint(spawned, factory);
-                HorusLog.Info("Factory", "[HORUS RTS] Rally movement command not available, unit spawned facing rally point.");
+                GlobalPosition rally = new GlobalPosition(factory.rallyX, factory.rallyY, factory.rallyZ);
+                if (HorusOrders.TrySetDestination(spawned, rally, playerCommand: false, out string rallyReason))
+                    HorusLog.Info("Factory", $"[HORUS RTS] Rally order issued to {spawned.unitName}.");
+                else
+                    HorusLog.Warning("Factory", $"[HORUS RTS] Rally order skipped for {spawned.unitName}: {rallyReason}.");
             }
 
             return spawned;
@@ -934,6 +962,7 @@ namespace HorusMod.Economy
 
         private RtsFactory CreateRuntimeFactory(FactoryPreset preset, RtsFactoryType type, int factionIndex, GlobalPosition globalPos, float yaw)
         {
+            if (preset == null || !CanUseFactoryFaction(factionIndex, out _)) return null;
             var queue = preset.productionUnitKeys != null
                 ? new List<string>(preset.productionUnitKeys)
                 : new List<string>();
@@ -949,7 +978,7 @@ namespace HorusMod.Economy
                 displayName = preset.presetName,
                 presetName = preset.presetName,
                 factionId = factionIndex,
-                factionName = FactionRegistry.factions?[factionIndex]?.factionName ?? $"Faction{factionIndex}",
+                factionName = FactionRegistry.factions[factionIndex]?.factionName ?? $"Faction{factionIndex}",
                 factoryType = type,
                 globalX = globalPos.x,
                 globalY = globalPos.y,
@@ -1005,9 +1034,55 @@ namespace HorusMod.Economy
             }
         }
 
+        public bool CanUseFactoryFaction(int factionIndex, out string reason)
+        {
+            var factions = FactionRegistry.factions;
+            if (factions == null || factions.Count == 0)
+            {
+                reason = "Playable factions are not loaded yet";
+                return false;
+            }
+            if (factionIndex < 0 || factionIndex >= factions.Count)
+            {
+                reason = "Factories cannot use Neutral; select a playable faction";
+                return false;
+            }
+            Faction faction = factions[factionIndex];
+            if (faction == null)
+            {
+                reason = $"Faction {factionIndex} is unavailable";
+                return false;
+            }
+            if (FactionRegistry.HQFromFaction(faction) == null)
+            {
+                reason = $"Faction '{faction.factionName}' has no active HQ";
+                return false;
+            }
+            reason = null;
+            return true;
+        }
+
+        private void ReportFactoryRejected(string reason)
+        {
+            HorusLog.Warning("Factory", $"[HORUS RTS] Factory action rejected: {reason}.");
+            HorusToasts.Show(reason);
+            if (SceneSingleton<GameplayUI>.i != null)
+                SceneSingleton<GameplayUI>.i.GameMessage("Horus: " + reason);
+        }
+
         public RtsFactory CreateFactoryAtPlacement(Vector3 localPos, float yaw, string presetName, int factionIndex)
         {
             if (!CanMutateFactories("create factory")) return null;
+            if (config?.settings == null || !config.settings.enableFactories)
+            {
+                ReportFactoryRejected("Factory system is disabled in config");
+                return null;
+            }
+            if (!CanUseFactoryFaction(factionIndex, out string factionReason))
+            {
+                ReportFactoryRejected(factionReason);
+                return null;
+            }
 
             var preset = config?.factoryPresets?.FirstOrDefault(p => string.Equals(p.presetName, presetName, StringComparison.OrdinalIgnoreCase));
             if (preset == null)
@@ -1027,6 +1102,11 @@ namespace HorusMod.Economy
             Enum.TryParse(preset.type, out type);
 
             var factory = CreateRuntimeFactory(preset, type, factionIndex, globalPos, yaw);
+            if (factory == null)
+            {
+                ReportFactoryRejected("Factory could not be initialized");
+                return null;
+            }
             factory.isVirtual = true;
 
             int faction = factionIndex;
@@ -1059,12 +1139,17 @@ namespace HorusMod.Economy
         {
             if (!CanMutateFactories("create factory from aimed unit")) return null;
             if (targetUnit == null) return null;
+            if (config?.settings == null || !config.settings.enableFactories)
+            {
+                ReportFactoryRejected("Factory system is disabled in config");
+                return null;
+            }
 
             var preset = config?.factoryPresets?.FirstOrDefault(p => string.Equals(p.presetName, presetName, StringComparison.OrdinalIgnoreCase));
             if (preset == null) return null;
 
             // Determine faction index from targetUnit
-            int factionIndex = 0;
+            int factionIndex = -1;
             var factions = FactionRegistry.factions;
             if (factions != null)
             {
@@ -1077,6 +1162,11 @@ namespace HorusMod.Economy
                         break;
                     }
                 }
+            }
+            if (!CanUseFactoryFaction(factionIndex, out string factionReason))
+            {
+                ReportFactoryRejected(factionReason);
+                return null;
             }
 
             if (activeFactories.Count(f => f.factionId == factionIndex) >= config.settings.maxFactoriesPerFaction)
@@ -1093,6 +1183,11 @@ namespace HorusMod.Economy
             Enum.TryParse(preset.type, out type);
 
             var factory = CreateRuntimeFactory(preset, type, factionIndex, globalPos, yaw);
+            if (factory == null)
+            {
+                ReportFactoryRejected("Factory could not be initialized");
+                return null;
+            }
             factory.anchorUnit = targetUnit;
             factory.anchorUnitName = targetUnit.unitName;
             factory.isVirtual = false;
@@ -1314,7 +1409,12 @@ namespace HorusMod.Economy
                 {
                     config = LoadConfig(ConfigPath);
                 }
-                NormalizeConfig(config);
+                bool migrated = NormalizeConfig(config);
+                if (migrated)
+                {
+                    SaveConfig(ConfigPath, config);
+                    HorusLog.Info("Factory", "[HORUS RTS] Migrated factory config to the current schema.");
+                }
             }
             catch (Exception ex)
             {
@@ -1325,14 +1425,22 @@ namespace HorusMod.Economy
                     factoryPresets = GetDefaultPresets()
                 };
                 NormalizeConfig(config);
+                SaveConfig(ConfigPath, config);
             }
         }
 
-        private void NormalizeConfig(RtsFactoriesConfig cfg)
+        private bool NormalizeConfig(RtsFactoriesConfig cfg)
         {
-            if (cfg == null) return;
-            if (cfg.settings == null) cfg.settings = new RtsFactoriesSettings();
-            if (cfg.factoryPresets == null) cfg.factoryPresets = new List<FactoryPreset>();
+            if (cfg == null) return false;
+            bool changed = false;
+            if (cfg.version < 1) { cfg.version = 1; changed = true; }
+            if (cfg.settings == null) { cfg.settings = new RtsFactoriesSettings(); changed = true; }
+            if (cfg.settings.maxFactoriesPerFaction <= 0)
+            {
+                cfg.settings.maxFactoriesPerFaction = 10;
+                changed = true;
+            }
+            if (cfg.factoryPresets == null) { cfg.factoryPresets = new List<FactoryPreset>(); changed = true; }
 
             var defaults = GetDefaultPresets();
             foreach (var defaultPreset in defaults)
@@ -1341,26 +1449,33 @@ namespace HorusMod.Economy
                 if (existing == null)
                 {
                     cfg.factoryPresets.Add(ClonePreset(defaultPreset));
+                    changed = true;
                     HorusLog.Info("Factory", $"[HORUS RTS] Factory preset added from defaults: {defaultPreset.presetName} visual={defaultPreset.visualBuilding}");
                     continue;
                 }
 
-                if (string.IsNullOrEmpty(existing.type)) existing.type = defaultPreset.type;
-                if (string.IsNullOrEmpty(existing.visualBuilding)) existing.visualBuilding = defaultPreset.visualBuilding;
-                if (existing.productionIntervalSeconds <= 0f) existing.productionIntervalSeconds = defaultPreset.productionIntervalSeconds;
-                if (existing.maxActiveProducedUnits < 0 || (existing.produceUnits && existing.maxActiveProducedUnits == 0)) existing.maxActiveProducedUnits = defaultPreset.maxActiveProducedUnits;
-                if (existing.productionUnitKeys == null) existing.productionUnitKeys = new List<string>();
+                if (string.IsNullOrEmpty(existing.type)) { existing.type = defaultPreset.type; changed = true; }
+                if (string.IsNullOrEmpty(existing.visualBuilding)) { existing.visualBuilding = defaultPreset.visualBuilding; changed = true; }
+                if (existing.productionIntervalSeconds <= 0f) { existing.productionIntervalSeconds = defaultPreset.productionIntervalSeconds; changed = true; }
+                if (existing.maxActiveProducedUnits < 0 || (existing.produceUnits && existing.maxActiveProducedUnits == 0))
+                {
+                    existing.maxActiveProducedUnits = defaultPreset.maxActiveProducedUnits;
+                    changed = true;
+                }
+                if (existing.productionUnitKeys == null) { existing.productionUnitKeys = new List<string>(); changed = true; }
                 if (existing.produceUnits && existing.productionUnitKeys.Count == 0 && defaultPreset.productionUnitKeys != null)
                 {
                     existing.productionUnitKeys = new List<string>(defaultPreset.productionUnitKeys);
+                    changed = true;
                 }
             }
 
             foreach (var preset in cfg.factoryPresets)
             {
-                if (preset.productionUnitKeys == null) preset.productionUnitKeys = new List<string>();
+                if (preset.productionUnitKeys == null) { preset.productionUnitKeys = new List<string>(); changed = true; }
                 HorusLog.Info("Factory", $"[HORUS RTS] Factory preset loaded: {preset.presetName} visual={preset.visualBuilding}");
             }
+            return changed;
         }
 
         private static FactoryPreset ClonePreset(FactoryPreset preset)
@@ -1574,7 +1689,14 @@ namespace HorusMod.Economy
             {
                 factory.enabled = false;
                 factory.anchorDestroyed = true;
+                factory.lastStatus = "Attached anchor is missing";
                 HorusLog.Warning("Factory", $"[HORUS RTS] Factory loaded inactive because attached anchor is missing: {factory.displayName} anchor={factory.anchorUnitName}");
+            }
+            if (!CanUseFactoryFaction(factory.factionId, out string factionReason))
+            {
+                factory.enabled = false;
+                factory.lastStatus = factionReason;
+                HorusLog.Warning("Factory", $"[HORUS RTS] Factory loaded inactive: {factory.displayName}: {factionReason}");
             }
         }
 

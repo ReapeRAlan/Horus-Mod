@@ -40,6 +40,10 @@ namespace HorusMod.UI.ContextMenu
         public static void Draw()
         {
             if (!IsOpen) return;
+            int previousDepth = GUI.depth;
+            GUI.depth = -1000;
+            try
+            {
             Event e = Event.current;
             Vector2 mouse = e.mousePosition;
 
@@ -120,6 +124,11 @@ namespace HorusMod.UI.ContextMenu
                         }
                     }
                 }
+            }
+            }
+            finally
+            {
+                GUI.depth = previousDepth;
             }
         }
 

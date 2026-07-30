@@ -9,7 +9,8 @@ A Game Master/Free Camera utility mod for Nuclear Option (formerly known as Zeus
 - Spawn selected units at the mouse cursor with **Left Click**.
 - Select units with **Left Click**, add with **Shift + Left Click**, or drag a selection box.
 - Issue formation-aware move orders with a quick **Right Click**; hold/drag right mouse to rotate the camera.
-- Open a contextual unit menu with **Alt + Right Click** for orders, loadouts, liveries, skill, duplication, focus, and deletion.
+- Open a contextual unit menu with **Right Click on a unit** (or **Alt + Right Click** anywhere) for orders, loadouts, skins/liveries, skill, duplication, focus, and deletion.
+- Move ground units, ships, and host-controlled AI aircraft in formations; aircraft orders use their native server autopilot and never override a player-controlled aircraft.
 - **Safe middle-click delete**: only removes units spawned by Horus (terrain, roads, buildings and original map objects are protected).
 - **Ghost preview**: see a semi-transparent preview of the selected unit at the placement position before spawning.
 - **Object yaw rotation before spawning** (slider, presets, and `Alt + Scroll`).
@@ -29,7 +30,7 @@ A Game Master/Free Camera utility mod for Nuclear Option (formerly known as Zeus
 - **RTS Factories & Production**: host-created visible factory buildings that generate income, loop production queues, use type-correct spawn rules, support rally points, and persist to JSON.
 - **Host-authoritative multiplayer**: clients are blocked by default and the UI shows the current permission status. Normal players do not need the mod installed, and if they do, they are locked to view-only mode. All spawn, delete, and budget modifications are validated server-side.
 - **Single-player / local-host authority**: all mutating editor actions are gated; dedicated/headless server control is not part of this release.
-- **Camera/Control Restore**: saves and restores aircraft control and camera view states. Temporarily suspends flight controls during Horus Mode to avoid input fighting.
+- **Camera/Control Restore**: saves and restores aircraft control, camera, cursor lock, and cursor visibility states. Focus loss and scene changes release Horus pointer capture safely.
 
 ## Installation
 > [!IMPORTANT]
@@ -47,8 +48,9 @@ A Game Master/Free Camera utility mod for Nuclear Option (formerly known as Zeus
 - **Shift + Left Click**: Add to selection, or repeat placement without leaving Place mode
 - **Left-drag**: Box-select units
 - **Middle Click**: Delete a unit spawned by Horus (safe delete — map/environment is protected)
-- **Right Click**: Move the current selection at the mouse cursor
-- **Alt + Right Click**: Open the context menu
+- **Right Click on world**: Move the current selection at the mouse cursor
+- **Right Click on unit**: Open that unit's context menu
+- **Alt + Right Click**: Force the context menu anywhere
 - **Right Click (Hold/Drag)**: Rotate Camera (6px / 250ms click disambiguation)
 - **F / H / Delete / Esc**: Focus / hold / delete / cancel
 - **Ctrl+D / Ctrl+A / Ctrl+Z / Ctrl+Y**: Duplicate / select all Horus units / undo / redo
@@ -109,7 +111,9 @@ Factories, bases, or carriers automatically generate income and produce units ov
   - `MixedProduction`: Allows mixed queues and chooses the correct ground, air, naval, or defense spawn path per unit.
 - **Visual Factory Buildings**: Virtual factories spawn visible buildings in the world. Defaults are `Storage Tank`, `Large Factory`, `Medium Aircraft Hangar`, and `Radar Station`. Older config names such as `Solar Array`, `Vehicle Factory`, `Hangar`, and `Warehouse` are resolved through aliases.
 - **Queue Loop**: Add units or compatible buildings to a factory's queue; it loops through the production list automatically. If budget or unit cap is insufficient, production pauses and reports the reason.
-- **Rally Points**: Set a rally point using targeted aim. Produced units spawn facing the rally direction automatically.
+- **Rally Points**: Set a rally point using targeted aim. Produced ground, naval, and AI air units receive a real movement order after spawning.
+- **Playable Factions**: Factories require a real faction with an active HQ. Neutral remains available for Sandbox unit placement but is rejected for factories with an explicit status instead of an index error.
+- **Config Migration**: Incomplete older economy/factory JSON files are filled with current defaults (including working production queues) and saved automatically.
 - **Persistent Instances**: Factory presets are saved in `BepInEx/config/HorusMod/rts_factories.json`; placed factory instances are saved in `BepInEx/config/HorusMod/rts_factory_instances.json`.
 - **Economy Config**: Budgets, passive income, caps, and costs are saved in `BepInEx/config/HorusMod/rts_economy.json`. Global passive income is optional and lower than factory income in default configs.
 - **How to Create Factories**:

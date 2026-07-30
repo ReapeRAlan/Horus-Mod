@@ -66,6 +66,9 @@ namespace HorusMod.Core
         private HorusInputRouter inputRouter;
         private HorusOverlay worldOverlay;
         private bool cursorLockedByHorus;
+        private bool cursorStateCaptured;
+        private CursorLockMode savedCursorLockState;
+        private bool savedCursorVisible;
         private UnitDefinition armedDefinitionOverride;
         private Unit lastSpawnedUnit;
         private bool scrollAxisAvailable = true;
@@ -227,10 +230,13 @@ namespace HorusMod.Core
             sceneLoadedSubscriptions++;
             SceneManager.sceneUnloaded += OnMissionUnloaded;
             sceneUnloadedSubscriptions++;
+            if (horusActive) CaptureGameCursorState();
         }
 
         private void OnDisable()
         {
+            inputRouter?.CancelPointerCapture();
+            RestoreGameCursorState();
             SceneManager.sceneLoaded -= OnMissionLoaded;
             sceneLoadedSubscriptions--;
             SceneManager.sceneUnloaded -= OnMissionUnloaded;
@@ -337,7 +343,7 @@ namespace HorusMod.Core
 
             if (!horusActive)
             {
-                if (cursorLockedByHorus) SetHorusCursorLock(false);
+                if (cursorStateCaptured) RestoreGameCursorState();
                 HorusPerformanceTracker.EndFrameTrace();
                 return;
             }
@@ -389,6 +395,9 @@ namespace HorusMod.Core
                 mapOpenedByHorus = false;
             }
             inputRouter.Update();
+            // CameraFreeState.UpdateState is intentionally patched out while Horus is
+            // active, so Horus must repair cursor drift itself.
+            SetHorusCursorLock(inputRouter != null && inputRouter.Looking);
             HorusPerformanceTracker.EndFrameTrace();
         }
 
@@ -464,10 +473,39 @@ namespace HorusMod.Core
 
         internal void SetHorusCursorLock(bool locked)
         {
-            if (cursorLockedByHorus == locked) return;
             cursorLockedByHorus = locked;
-            Cursor.lockState = locked ? CursorLockMode.Locked : CursorLockMode.None;
-            Cursor.visible = !locked;
+            // Deactivation and scene teardown can call this while normal gameplay owns
+            // the cursor. Never overwrite the game's cursor unless Horus captured it.
+            if (!horusActive && !cursorStateCaptured) return;
+            CursorLockMode desiredLock = locked ? CursorLockMode.Locked : CursorLockMode.None;
+            bool desiredVisible = !locked;
+            if (Cursor.lockState != desiredLock) Cursor.lockState = desiredLock;
+            if (Cursor.visible != desiredVisible) Cursor.visible = desiredVisible;
+        }
+
+        private void CaptureGameCursorState()
+        {
+            if (cursorStateCaptured) return;
+            savedCursorLockState = Cursor.lockState;
+            savedCursorVisible = Cursor.visible;
+            cursorStateCaptured = true;
+            SetHorusCursorLock(false);
+        }
+
+        private void RestoreGameCursorState()
+        {
+            cursorLockedByHorus = false;
+            if (!cursorStateCaptured) return;
+            Cursor.lockState = savedCursorLockState;
+            Cursor.visible = savedCursorVisible;
+            cursorStateCaptured = false;
+        }
+
+        private void OnApplicationFocus(bool focused)
+        {
+            if (!horusActive) return;
+            inputRouter?.CancelPointerCapture();
+            if (focused) SetHorusCursorLock(false);
         }
 
         internal Vector2 RawScreenToScaledGui(Vector2 rawScreen)
@@ -544,7 +582,11 @@ namespace HorusMod.Core
 
         private void ToggleHorusMode()
         {
-            if (GameManager.gameState != GameState.SinglePlayer && GameManager.gameState != GameState.Multiplayer)
+            // Entering Horus requires a mission. Exiting must always be allowed,
+            // especially during scene unload after GameState has already become Menu.
+            if (!horusActive &&
+                GameManager.gameState != GameState.SinglePlayer &&
+                GameManager.gameState != GameState.Multiplayer)
             {
                 HorusLog.Warning("Core", $"Cannot activate Horus Mode. Current GameState: {GameManager.gameState}");
                 return;
@@ -553,6 +595,7 @@ namespace HorusMod.Core
             horusActive = !horusActive;
             HorusLog.Info("Core", $"[HORUS DEBUG] Horus mode toggled: {horusActive}");
             ExitMapSpawnMode();
+            if (horusActive) CaptureGameCursorState();
             if (!horusActive)
             {
                 ghost.Clear();
@@ -599,6 +642,7 @@ namespace HorusMod.Core
                 }
                 savedCameraState = null;
                 savedFollowingUnit = null;
+                RestoreGameCursorState();
             }
             
             if (horusActive && CameraStateManager.i != null)
@@ -802,6 +846,7 @@ namespace HorusMod.Core
             GUILayout.Label($"Rally point status: {rallyText}");
             GUILayout.Label($"Anchor status: {manager.GetAnchorStatus(f)}");
             GUILayout.Label($"Consumes budget: {(f.consumeBudgetForProduction ? "Yes" : "No")}");
+            GUILayout.Label($"Runtime status: {(string.IsNullOrEmpty(f.lastStatus) ? "Ready" : f.lastStatus)}");
 
             GUILayout.Label($"Production queue (current index: {f.currentProductionIndex}):");
             if (f.productionUnitKeys == null || f.productionUnitKeys.Count == 0)
@@ -904,6 +949,14 @@ namespace HorusMod.Core
             if (selectedPresetIndex >= presetNames.Length) selectedPresetIndex = 0;
             selectedPresetIndex = GUILayout.SelectionGrid(selectedPresetIndex, presetNames, 2);
             string currentPresetName = presetNames[selectedPresetIndex];
+            bool selectedFactionUsable = manager.CanUseFactoryFaction(selectedFactionIndex, out string selectedFactionReason);
+            if (!selectedFactionUsable)
+            {
+                Color previousColor = GUI.color;
+                GUI.color = new Color(1f, 0.65f, 0.25f);
+                GUILayout.Label("Placement blocked: " + selectedFactionReason);
+                GUI.color = previousColor;
+            }
 
             if (!isHost)
             {
@@ -913,6 +966,8 @@ namespace HorusMod.Core
             }
 
             GUILayout.BeginHorizontal();
+            bool previousEnabled = GUI.enabled;
+            GUI.enabled = previousEnabled && selectedFactionUsable;
             if (GUILayout.Button("Create Factory Here", GUILayout.Height(30)))
             {
                 if (CanRunFactoryCreateAction())
@@ -932,6 +987,7 @@ namespace HorusMod.Core
                     }
                 }
             }
+            GUI.enabled = previousEnabled;
             if (GUILayout.Button("Create Factory From Aimed Unit", GUILayout.Height(30)))
             {
                 if (CanRunFactoryCreateAction())
@@ -963,15 +1019,21 @@ namespace HorusMod.Core
                     ghost.Clear();
                 }
             }
-            else if (GUILayout.Button("Arm Factory Placement", GUILayout.Height(30)))
+            else
             {
-                armedFactoryPresetName = currentPresetName;
-                if (economyManager != null) economyManager.DisarmDeployment();
-                ghost.Clear();
-                if (SceneSingleton<GameplayUI>.i != null)
+                previousEnabled = GUI.enabled;
+                GUI.enabled = previousEnabled && selectedFactionUsable;
+                if (GUILayout.Button("Arm Factory Placement", GUILayout.Height(30)))
                 {
-                    SceneSingleton<GameplayUI>.i.GameMessage($"Horus: Armed placement for {currentPresetName}. Click in world/map to place.");
+                    armedFactoryPresetName = currentPresetName;
+                    if (economyManager != null) economyManager.DisarmDeployment();
+                    ghost.Clear();
+                    if (SceneSingleton<GameplayUI>.i != null)
+                    {
+                        SceneSingleton<GameplayUI>.i.GameMessage($"Horus: Armed placement for {currentPresetName}. Click in world/map to place.");
+                    }
                 }
+                GUI.enabled = previousEnabled;
             }
         }
 
@@ -1072,6 +1134,7 @@ namespace HorusMod.Core
         {
             if (definition == null) return;
             armedDefinitionOverride = definition;
+            showAircraftCustomizationTools = definition is AircraftDefinition;
             selectedCategoryIndex = GetUnitCategoryIndex(definition);
             SetSpawnAltitude(spawnAltitude, definition);
             armedFactoryPresetName = null;
@@ -2018,6 +2081,7 @@ namespace HorusMod.Core
         private void OnDestroy()
         {
             inputRouter?.Deactivate();
+            RestoreGameCursorState();
             ghost.Dispose();
             HorusTheme.Dispose();
         }

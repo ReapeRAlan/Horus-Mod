@@ -69,8 +69,13 @@ namespace HorusMod.Economy
                     string json = System.IO.File.ReadAllText(ConfigPath);
                     config = JsonUtility.FromJson<RtsEconomyConfig>(json);
                     if (config == null) throw new Exception("Parsed config is null");
-                    if (config.unitCostMultiplier <= 0f) config.unitCostMultiplier = 1f;
                     HorusLog.Info("Economy", $"[RTS Economy] Loaded config from {ConfigPath}");
+                }
+
+                if (NormalizeConfig())
+                {
+                    SaveConfig();
+                    HorusLog.Info("Economy", "[RTS Economy] Migrated incomplete config to the current schema.");
                 }
 
                 // Build lookup tables
@@ -80,8 +85,47 @@ namespace HorusMod.Economy
             {
                 HorusLog.Error("Economy", $"[RTS Economy] Config load failed: {ex.Message}. Using defaults.");
                 config = CreateDefaultConfig();
+                SaveConfig();
                 RebuildLookups();
             }
+        }
+
+        private bool NormalizeConfig()
+        {
+            if (config == null)
+            {
+                config = CreateDefaultConfig();
+                return true;
+            }
+
+            bool changed = false;
+            RtsEconomyConfig defaults = CreateDefaultConfig();
+            if (config.incomeTickSeconds < 1f)
+            {
+                config.incomeTickSeconds = defaults.incomeTickSeconds;
+                changed = true;
+            }
+            if (config.unitCostMultiplier <= 0f)
+            {
+                config.unitCostMultiplier = defaults.unitCostMultiplier;
+                changed = true;
+            }
+            if (config.factionBudgets == null || config.factionBudgets.Count == 0)
+            {
+                config.factionBudgets = defaults.factionBudgets;
+                changed = true;
+            }
+            if (config.categoryCosts == null)
+            {
+                config.categoryCosts = new List<CategoryCostEntry>();
+                changed = true;
+            }
+            if (config.unitCostOverrides == null)
+            {
+                config.unitCostOverrides = new List<UnitCostOverride>();
+                changed = true;
+            }
+            return changed;
         }
 
         private void RebuildLookups()
