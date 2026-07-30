@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
 using HorusMod.Networking;
+using HorusMod.Logging;
 
 namespace HorusMod.Economy
 {
@@ -22,8 +23,7 @@ namespace HorusMod.Economy
 
         // ─── Config ──────────────────────────────────────────────────────────────
         private RtsEconomyConfig config;
-        private Dictionary<string, float> unitCostLookup = new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
-        private Dictionary<string, float> categoryCostLookup = new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, float> unitCostLookup = new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
 
         // ─── Runtime State ───────────────────────────────────────────────────────
         private readonly Dictionary<int, FactionEconomyState> factionStates = new Dictionary<int, FactionEconomyState>();
@@ -62,14 +62,15 @@ namespace HorusMod.Economy
                     config = CreateDefaultConfig();
                     string json = JsonUtility.ToJson(config, true);
                     System.IO.File.WriteAllText(ConfigPath, json);
-                    HorusPlugin.Logger.LogInfo($"[RTS Economy] Created default config at {ConfigPath}");
+                    HorusLog.Info("Economy", $"[RTS Economy] Created default config at {ConfigPath}");
                 }
                 else
                 {
                     string json = System.IO.File.ReadAllText(ConfigPath);
                     config = JsonUtility.FromJson<RtsEconomyConfig>(json);
                     if (config == null) throw new Exception("Parsed config is null");
-                    HorusPlugin.Logger.LogInfo($"[RTS Economy] Loaded config from {ConfigPath}");
+                    if (config.unitCostMultiplier <= 0f) config.unitCostMultiplier = 1f;
+                    HorusLog.Info("Economy", $"[RTS Economy] Loaded config from {ConfigPath}");
                 }
 
                 // Build lookup tables
@@ -77,7 +78,7 @@ namespace HorusMod.Economy
             }
             catch (Exception ex)
             {
-                HorusPlugin.Logger.LogError($"[RTS Economy] Config load failed: {ex.Message}. Using defaults.");
+                HorusLog.Error("Economy", $"[RTS Economy] Config load failed: {ex.Message}. Using defaults.");
                 config = CreateDefaultConfig();
                 RebuildLookups();
             }
@@ -90,20 +91,12 @@ namespace HorusMod.Economy
             {
                 foreach (var entry in config.unitCostOverrides)
                 {
-                    if (!string.IsNullOrEmpty(entry.unitName))
-                        unitCostLookup[entry.unitName] = entry.cost;
+                    string key = !string.IsNullOrWhiteSpace(entry.jsonKey) ? entry.jsonKey : entry.unitName;
+                    if (!string.IsNullOrWhiteSpace(key))
+                        unitCostLookup[key] = entry.cost;
                 }
             }
 
-            categoryCostLookup.Clear();
-            if (config.categoryCosts != null)
-            {
-                foreach (var entry in config.categoryCosts)
-                {
-                    if (!string.IsNullOrEmpty(entry.category))
-                        categoryCostLookup[entry.category] = entry.fallbackCost;
-                }
-            }
         }
 
         public void SaveConfig()
@@ -118,7 +111,7 @@ namespace HorusMod.Economy
             }
             catch (Exception ex)
             {
-                HorusPlugin.Logger.LogError($"[RTS Economy] Config save failed: {ex.Message}");
+                HorusLog.Error("Economy", $"[RTS Economy] Config save failed: {ex.Message}");
             }
         }
 
@@ -127,30 +120,14 @@ namespace HorusMod.Economy
             var cfg = new RtsEconomyConfig
             {
                 incomeTickSeconds = 5f,
+                unitCostMultiplier = 1f,
                 factionBudgets = new List<FactionBudgetEntry>
                 {
                     new FactionBudgetEntry { factionName = "Primeva", startingBudget = 10000f, incomePerTick = 5f, unitCap = 30 },
                     new FactionBudgetEntry { factionName = "Boscali", startingBudget = 10000f, incomePerTick = 5f, unitCap = 30 }
                 },
-                categoryCosts = new List<CategoryCostEntry>
-                {
-                    new CategoryCostEntry { category = "Aircraft", fallbackCost = 1500f },
-                    new CategoryCostEntry { category = "Vehicle",  fallbackCost = 300f },
-                    new CategoryCostEntry { category = "Ship",     fallbackCost = 4000f },
-                    new CategoryCostEntry { category = "Building", fallbackCost = 1000f },
-                    new CategoryCostEntry { category = "Scenery",  fallbackCost = 50f }
-                },
-                unitCostOverrides = new List<UnitCostOverride>
-                {
-                    new UnitCostOverride { unitName = "Compass",   cost = 1200f },
-                    new UnitCostOverride { unitName = "Cricket",   cost = 800f },
-                    new UnitCostOverride { unitName = "Seymour",   cost = 1500f },
-                    new UnitCostOverride { unitName = "Reveller",  cost = 1400f },
-                    new UnitCostOverride { unitName = "Ifrit",     cost = 3000f },
-                    new UnitCostOverride { unitName = "Medusa",    cost = 2500f },
-                    new UnitCostOverride { unitName = "Nailer",    cost = 200f },
-                    new UnitCostOverride { unitName = "Goldfinch", cost = 4000f }
-                }
+                categoryCosts = new List<CategoryCostEntry>(),
+                unitCostOverrides = new List<UnitCostOverride>()
             };
             return cfg;
         }
@@ -182,7 +159,7 @@ namespace HorusMod.Economy
                     ActiveUnitCount = 0
                 };
                 factionStates[i] = state;
-                HorusPlugin.Logger.LogInfo($"[RTS Economy] Init faction '{fname}': budget={state.Budget}, income={state.IncomePerTick}/tick, cap={state.UnitCap}");
+                HorusLog.Info("Economy", $"[RTS Economy] Init faction '{fname}': budget={state.Budget}, income={state.IncomePerTick}/tick, cap={state.UnitCap}");
             }
 
             lastIncomeTickTime = Time.time;
@@ -262,18 +239,13 @@ namespace HorusMod.Economy
         {
             if (def == null) return 0f;
 
-            // Exact name match
-            if (unitCostLookup.TryGetValue(def.unitName, out float cost)) return cost;
-
-            // jsonKey match
             if (!string.IsNullOrEmpty(def.jsonKey) && unitCostLookup.TryGetValue(def.jsonKey, out float keyCost))
                 return keyCost;
 
-            // Category fallback
-            string categoryKey = GetCategoryKey(def);
-            if (categoryCostLookup.TryGetValue(categoryKey, out float catCost)) return catCost;
-
-            return 500f; // ultimate fallback
+            float multiplier = config != null && config.unitCostMultiplier > 0f
+                ? config.unitCostMultiplier
+                : 1f;
+            return Mathf.Max(0f, def.value * multiplier);
         }
 
         public float GetGroupTotalCost(List<UnitDefinition> defs)
@@ -282,16 +254,6 @@ namespace HorusMod.Economy
             float total = 0f;
             foreach (var def in defs) total += GetUnitCost(def);
             return total;
-        }
-
-        private static string GetCategoryKey(UnitDefinition def)
-        {
-            if (def is AircraftDefinition) return "Aircraft";
-            if (def is VehicleDefinition) return "Vehicle";
-            if (def is ShipDefinition) return "Ship";
-            if (def is BuildingDefinition) return "Building";
-            if (def is SceneryDefinition) return "Scenery";
-            return "Unknown";
         }
 
         // ─── Faction State Access ────────────────────────────────────────────────
@@ -316,11 +278,11 @@ namespace HorusMod.Economy
                 var prop = typeof(Faction).GetProperty("budget", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.IgnoreCase);
                 if (prop != null) return Convert.ToSingle(prop.GetValue(faction));
                 
-                HorusPlugin.Logger.LogWarning($"[RTS Economy] SyncWithFactionBudget failed: could not find 'budget' on Faction {faction.factionName}");
+                HorusLog.Warning("Economy", $"[RTS Economy] SyncWithFactionBudget failed: could not find 'budget' on Faction {faction.factionName}");
             }
             catch (Exception ex)
             {
-                HorusPlugin.Logger.LogWarning($"[RTS Economy] SyncWithFactionBudget exception for {faction.factionName}: {ex.Message}");
+                HorusLog.Warning("Economy", $"[RTS Economy] SyncWithFactionBudget exception for {faction.factionName}: {ex.Message}");
             }
             return null;
         }
@@ -335,11 +297,11 @@ namespace HorusMod.Economy
                 var prop = typeof(Faction).GetProperty("budget", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.IgnoreCase);
                 if (prop != null && prop.CanWrite) { prop.SetValue(faction, Convert.ChangeType(value, prop.PropertyType)); return; }
 
-                HorusPlugin.Logger.LogWarning($"[RTS Economy] SetFactionRealBudget failed: could not find writable 'budget' on Faction {faction.factionName}");
+                HorusLog.Warning("Economy", $"[RTS Economy] SetFactionRealBudget failed: could not find writable 'budget' on Faction {faction.factionName}");
             }
             catch (Exception ex)
             {
-                HorusPlugin.Logger.LogWarning($"[RTS Economy] SetFactionRealBudget exception for {faction.factionName}: {ex.Message}");
+                HorusLog.Warning("Economy", $"[RTS Economy] SetFactionRealBudget exception for {faction.factionName}: {ex.Message}");
             }
         }
 
@@ -518,7 +480,7 @@ namespace HorusMod.Economy
                 state.ActiveUnitCount = state.TrackedUnits.Count;
             }
 
-            HorusPlugin.Logger.LogInfo($"[RTS Economy] Transaction committed: -{cost:F0} for faction '{state.FactionName}'. Budget={state.Budget:F0}, Units={state.ActiveUnitCount}/{state.UnitCap}");
+            HorusLog.Info("Economy", $"[RTS Economy] Transaction committed: -{cost:F0} for faction '{state.FactionName}'. Budget={state.Budget:F0}, Units={state.ActiveUnitCount}/{state.UnitCap}");
         }
 
         /// <summary>
@@ -543,7 +505,7 @@ namespace HorusMod.Economy
                 state.ActiveUnitCount = state.TrackedUnits.Count;
             }
 
-            HorusPlugin.Logger.LogInfo($"[RTS Economy] Group transaction committed: -{tx.GroupTotalCost:F0} for faction '{state.FactionName}'. Budget={state.Budget:F0}, Units={state.ActiveUnitCount}/{state.UnitCap}");
+            HorusLog.Info("Economy", $"[RTS Economy] Group transaction committed: -{tx.GroupTotalCost:F0} for faction '{state.FactionName}'. Budget={state.Budget:F0}, Units={state.ActiveUnitCount}/{state.UnitCap}");
         }
 
         // ─── Deployment Confirmation ─────────────────────────────────────────────
@@ -566,7 +528,7 @@ namespace HorusMod.Economy
             ArmedGroupDefinitions = null;
             ArmedCost = tx.Cost;
             ArmedStatusText = $"✓ ARMED: {def.unitName} ({tx.Cost:F0})";
-            HorusPlugin.Logger.LogInfo($"[RTS Economy] Deployment armed: {def.unitName} cost={tx.Cost:F0}");
+            HorusLog.Info("Economy", $"[RTS Economy] Deployment armed: {def.unitName} cost={tx.Cost:F0}");
         }
 
         /// <summary>
@@ -587,7 +549,7 @@ namespace HorusMod.Economy
             ArmedGroupDefinitions = new List<UnitDefinition>(defs);
             ArmedCost = tx.GroupTotalCost;
             ArmedStatusText = $"✓ ARMED: Group x{defs.Count} ({tx.GroupTotalCost:F0})";
-            HorusPlugin.Logger.LogInfo($"[RTS Economy] Group deployment armed: {defs.Count} units, cost={tx.GroupTotalCost:F0}");
+            HorusLog.Info("Economy", $"[RTS Economy] Group deployment armed: {defs.Count} units, cost={tx.GroupTotalCost:F0}");
         }
 
         public void DisarmDeployment()

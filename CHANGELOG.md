@@ -1,5 +1,23 @@
 # Changelog
 
+## [1.2.3] - Unreleased
+
+### Added
+- Themed, resizable and persistent tabbed editor with cached IMGUI styles.
+- Searchable and virtualized native unit catalog with icons, metadata, role filters, favorites, and recents.
+- Mouse selection, hover, marquee selection, RMB move/context actions, formation orders, overlays, and map synchronization.
+- Loadout/livery/skill editing, real faction convoy groups, native editor altitude ranges, control groups, duplication, and undo/redo.
+- Status toasts, compatibility audit, and expanded visual self-test panel.
+
+### Fixed
+- Ship-spacing solver convergence and per-frame ghost/log spam.
+- Neutral faction spawning and aircraft loadout replication through `Networkloadout`.
+- Window dragging interfering with sliders and RMB click-versus-camera-look ambiguity.
+- RTS costs now use native `UnitDefinition.value` with stable `jsonKey` overrides.
+
+### Removed
+- Non-functional command/execution/network/server placeholders and their reserved configuration flags.
+
 ## [1.2.2] - 2026-07-20
 
 ### Added

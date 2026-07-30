@@ -5,8 +5,11 @@ A Game Master/Free Camera utility mod for Nuclear Option (formerly known as Zeus
 ## Features
 - Toggle Horus Mode (Free Camera + UI) with **F9**.
 - Toggle UI visibility with **F10**.
-- Select Faction and Unit Category.
-- Spawn selected units at crosshair with **Left Click**.
+- Search and filter the native unit catalog by category, role, favorites, and recent use.
+- Spawn selected units at the mouse cursor with **Left Click**.
+- Select units with **Left Click**, add with **Shift + Left Click**, or drag a selection box.
+- Issue formation-aware move orders with a quick **Right Click**; hold/drag right mouse to rotate the camera.
+- Open a contextual unit menu with **Alt + Right Click** for orders, loadouts, liveries, skill, duplication, focus, and deletion.
 - **Safe middle-click delete**: only removes units spawned by Horus (terrain, roads, buildings and original map objects are protected).
 - **Ghost preview**: see a semi-transparent preview of the selected unit at the placement position before spawning.
 - **Object yaw rotation before spawning** (slider, presets, and `Alt + Scroll`).
@@ -17,15 +20,15 @@ A Game Master/Free Camera utility mod for Nuclear Option (formerly known as Zeus
 - **Snap to ground** for ground units and experimental **align to surface**.
 - **Map Spawn Mode**: open the map and click anywhere to place units at that location.
 - Reset buttons for altitude and yaw.
-- Collapsible UI sections with live status labels.
+- Resizable, persistent themed editor with Place, Manage, RTS, Settings, and optional Debug tabs.
 - **Groups & Formations**: spawn groups of up to 20 units in Column, Line, Grid, Circle, or V formations with adjustable spacing and Group Ghost Previews.
-- **Group Presets**: quick buttons to configure groups (Convoy, Armored Group, Squadron, Air Patrol, Naval Group, AA Battery, Base Defense).
+- **Native faction groups**: uses each faction's real `GetConvoyGroups()` definitions, composition, and native cost.
 - **Custom Group Editor**: build and save heterogeneous groups of mixed unit types, serialized to JSON configuration files.
 - **Spawn Stationary**: option to set ground vehicles/ships to hold position on spawn (applies to both single and group spawns).
-- **RTS / Budget Mode**: Real-Time Strategy economy mode. Spawning units/groups costs faction budget, tracking Primeva and Boscali budgets independently. Spawning is blocked on insufficient budget. Includes manual budget adjustments (host-only) in the UI. Loads costs and passive income from `BepInEx/config/HorusMod/rts_economy.json` (auto-created on startup with default values).
+- **RTS / Budget Mode**: uses each unit's native `UnitDefinition.value`, with optional stable `jsonKey` overrides and a global multiplier in `BepInEx/config/HorusMod/rts_economy.json`.
 - **RTS Factories & Production**: host-created visible factory buildings that generate income, loop production queues, use type-correct spawn rules, support rally points, and persist to JSON.
 - **Host-authoritative multiplayer**: clients are blocked by default and the UI shows the current permission status. Normal players do not need the mod installed, and if they do, they are locked to view-only mode. All spawn, delete, and budget modifications are validated server-side.
-- **Dedicated server support**: Dedicated server support is being prepared architecturally, but is not officially supported yet.
+- **Single-player / local-host authority**: all mutating editor actions are gated; dedicated/headless server control is not part of this release.
 - **Camera/Control Restore**: saves and restores aircraft control and camera view states. Temporarily suspends flight controls during Horus Mode to avoid input fighting.
 
 ## Installation
@@ -40,9 +43,16 @@ A Game Master/Free Camera utility mod for Nuclear Option (formerly known as Zeus
 ## Controls
 - **F9** (configurable): Toggle Horus Mode
 - **F10** (configurable): Hide/Show UI
-- **Left Click**: Spawn selected unit/group (or place at map cursor in Map Spawn Mode)
+- **Left Click**: Select a unit, or place the armed unit/group
+- **Shift + Left Click**: Add to selection, or repeat placement without leaving Place mode
+- **Left-drag**: Box-select units
 - **Middle Click**: Delete a unit spawned by Horus (safe delete — map/environment is protected)
-- **Right Click (Hold)**: Rotate Camera
+- **Right Click**: Move the current selection at the mouse cursor
+- **Alt + Right Click**: Open the context menu
+- **Right Click (Hold/Drag)**: Rotate Camera (6px / 250ms click disambiguation)
+- **F / H / Delete / Esc**: Focus / hold / delete / cancel
+- **Ctrl+D / Ctrl+A / Ctrl+Z / Ctrl+Y**: Duplicate / select all Horus units / undo / redo
+- **Ctrl+1–9 / 1–9**: Assign / recall control groups
 - **W/A/S/D/Q/E**: Move Camera
 - **Left Shift**: Boost Camera Speed
 - **Ctrl + Scroll**: Adjust spawn altitude
@@ -86,7 +96,7 @@ You can toggle between **Sandbox Mode** (free spawns, default) and **RTS / Comma
 - **RTS / Commander Mode**: Spawning units/groups and factory production deduct costs from the active faction's budget (**Primeva** or **Boscali**).
   - **Manual Deployment**: Click "Arm Deployment" first, view the cost preview, then left-click in the world to spawn the unit. The budget is deducted only if placement succeeds.
   - **Budget & Caps**: Starting budgets, tick income, and unit caps are loaded from `BepInEx/config/HorusMod/rts_economy.json` (auto-created on startup).
-  - **Unit Costs**: Custom costs are resolved from `rts_economy.json` with category-based fallbacks.
+  - **Unit Costs**: Native `UnitDefinition.value` multiplied by `unitCostMultiplier`; optional overrides use stable `jsonKey` values.
   
 #### RTS Factories & Production
 Factories, bases, or carriers automatically generate income and produce units over time in RTS Mode:
@@ -122,9 +132,7 @@ If you do have Horus installed, the UI shows your current mode:
 - **Multiplayer Host** — full access.
 - **Client (View Only)** — spawning, deleting, and budget adjustments are blocked by default.
 
-*Note for future v1.3.0 Dedicated Server architecture: A separate Horus Server plugin will be used on headless servers, while authorized Game Masters will use the Horus client plugin to manage the game. Normal players will still require no installation.*
-
-Client request/whitelist support is reserved for a future update (config flags `AllowClientHorusRequests` and `EnableExperimentalWhitelist`, both off by default).
+Dedicated/headless command transport is intentionally out of scope; this release does not ship placeholder client/server command APIs.
 
 ### Map Spawn Mode
 1. Enable **Map Spawn: ON** in the Horus window (this also opens the map).

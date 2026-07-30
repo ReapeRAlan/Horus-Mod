@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using UnityEngine;
+using HorusMod.Logging;
 
 namespace HorusMod.Economy
 {
@@ -45,6 +46,9 @@ namespace HorusMod.Economy
     [Serializable]
     public class UnitCostOverride
     {
+        public string jsonKey;
+        // Legacy field retained only so existing configs deserialize. New entries
+        // should use jsonKey; matching is always performed against def.jsonKey.
         public string unitName;
         public float cost;
     }
@@ -56,8 +60,12 @@ namespace HorusMod.Economy
     public class RtsEconomyConfig
     {
         public float incomeTickSeconds = 5f;
+        public float unitCostMultiplier = 1f;
         public List<FactionBudgetEntry> factionBudgets = new List<FactionBudgetEntry>();
+        // Kept for backwards-compatible deserialization. Native UnitDefinition.value
+        // is now the source of truth; category fallbacks are no longer consulted.
         public List<CategoryCostEntry> categoryCosts = new List<CategoryCostEntry>();
+        // Entries are matched against UnitDefinition.jsonKey.
         public List<UnitCostOverride> unitCostOverrides = new List<UnitCostOverride>();
     }
 
@@ -85,7 +93,7 @@ namespace HorusMod.Economy
             ActiveUnitCount = TrackedUnits.Count;
             if (removed > 0)
             {
-                HorusPlugin.Logger.LogInfo($"[RTS Economy] {FactionName}: cleaned {removed} dead units. Active={ActiveUnitCount}/{UnitCap}");
+                HorusLog.Info("Economy", $"[RTS Economy] {FactionName}: cleaned {removed} dead units. Active={ActiveUnitCount}/{UnitCap}");
             }
         }
     }

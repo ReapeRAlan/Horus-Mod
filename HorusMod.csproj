@@ -50,6 +50,10 @@
       <HintPath>$(NuclearOptionDir)\NuclearOption_Data\Managed\UnityEngine.InputLegacyModule.dll</HintPath>
       <Private>False</Private>
     </Reference>
+    <Reference Include="UnityEngine.TextRenderingModule">
+      <HintPath>$(NuclearOptionDir)\NuclearOption_Data\Managed\UnityEngine.TextRenderingModule.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
     <Reference Include="UnityEngine.UI">
       <HintPath>$(NuclearOptionDir)\NuclearOption_Data\Managed\UnityEngine.UI.dll</HintPath>
       <Private>False</Private>

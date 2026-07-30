@@ -2,6 +2,9 @@ using System;
 using BepInEx;
 using BepInEx.Configuration;
 using BepInEx.Logging;
+using HorusMod.Logging;
+using HorusMod.Data;
+using HorusMod.Compat;
 using UnityEngine;
 
 namespace HorusMod
@@ -11,11 +14,12 @@ namespace HorusMod
     {
         public const string PluginGuid = "com.reaperalan.horusmod";
         public const string PluginName = "Horus Mod Starter";
-        public const string PluginVersion = "1.2.1";
+        public const string PluginVersion = "1.2.3";
 
         public static new ManualLogSource Logger { get; private set; }
         public static ConfigEntry<KeyCode> HotkeyToggleMode { get; private set; }
         public static ConfigEntry<KeyCode> HotkeyToggleUI { get; private set; }
+        public static ConfigEntry<KeyCode> HotkeyDeselectUnit { get; private set; }
         public static ConfigEntry<float> UIScale { get; private set; }
         public static ConfigEntry<float> AltitudeStep { get; private set; }
         public static ConfigEntry<float> AltitudeStepLarge { get; private set; }
@@ -25,8 +29,6 @@ namespace HorusMod
         public static ConfigEntry<bool> AllowScrollWhileMapOpen { get; private set; }
         public static ConfigEntry<bool> InvertScrollDirection { get; private set; }
         public static ConfigEntry<bool> AllowDeletingNonHorusUnits { get; private set; }
-        public static ConfigEntry<bool> AllowClientHorusRequests { get; private set; }
-        public static ConfigEntry<bool> EnableExperimentalWhitelist { get; private set; }
         public static ConfigEntry<bool> AutoOceanSnapForShips { get; private set; }
         public static ConfigEntry<bool> OceanSnapActive { get; private set; }
         public static ConfigEntry<float> OceanHeightOverride { get; private set; }
@@ -37,8 +39,6 @@ namespace HorusMod
         public static ConfigEntry<float> ShipSpawnLift { get; private set; }
         public static ConfigEntry<bool> StabilizeShipsAfterSpawn { get; private set; }
         public static ConfigEntry<bool> AllowDeletingOriginalMissionUnits { get; private set; }
-        public static ConfigEntry<float> StartingBudgetPrimeva { get; private set; }
-        public static ConfigEntry<float> StartingBudgetBoscali { get; private set; }
 
         // RTS Commander Mode settings
         public static ConfigEntry<bool> AllowGroupPurchasesInRtsMode { get; private set; }
@@ -47,39 +47,35 @@ namespace HorusMod
         public static ConfigEntry<bool> RequireDeploymentConfirmation { get; private set; }
         public static ConfigEntry<bool> AutoDisarmAfterPurchase { get; private set; }
         public static ConfigEntry<bool> EnableRtsIncome { get; private set; }
-        public static ConfigEntry<float> IncomeTickSeconds { get; private set; }
         public static ConfigEntry<bool> EnableRtsUnitCap { get; private set; }
         public static ConfigEntry<bool> SyncWithFactionBudget { get; private set; }
         public static ConfigEntry<bool> EnableStrictBaseDeployment { get; private set; }
         public static ConfigEntry<float> BaseDeploymentRadius { get; private set; }
 
-        // Dedicated Server / MVP Networking Stubs
-        public static ConfigEntry<bool> DedicatedServerBridgeEnabled { get; private set; }
-        public static ConfigEntry<string> BindAddress { get; private set; }
-        public static ConfigEntry<int> Port { get; private set; }
-        public static ConfigEntry<string> AuthenticationToken { get; private set; }
-        public static ConfigEntry<int> RateLimitPerSecond { get; private set; }
+        public static ConfigEntry<HorusLogLevel> LogVerbosity { get; private set; }
+        public static ConfigEntry<bool> ShowDebugTab { get; private set; }
 
         private void Awake()
         {
             Logger = base.Logger;
-            Logger.LogInfo("[HORUS BUILD CHECK] Horus Mod v1.2.0 ship-debug build loaded at " + DateTime.Now);
+            HorusLog.Info("Bootstrap", $"[Horus:Bootstrap] Horus Mod v{PluginVersion} loaded at {DateTime.Now:O}");
             try
             {
                 var assemblyPath = typeof(HorusPlugin).Assembly.Location;
                 var hash = GetFileHash(assemblyPath);
-                Logger.LogInfo($"[HORUS BUILD CHECK] Path: {assemblyPath} | SHA256: {hash}");
+                HorusLog.Info("Bootstrap", $"[HORUS BUILD CHECK] Path: {assemblyPath} | SHA256: {hash}");
             }
             catch (Exception ex)
             {
-                Logger.LogInfo($"[HORUS BUILD CHECK] Path retrieval failed: {ex.Message}");
+                HorusLog.Info("Bootstrap", $"[HORUS BUILD CHECK] Path retrieval failed: {ex.Message}");
             }
 
-            Logger.LogInfo($"{PluginName} v{PluginVersion}: AWAKE CALLED. Bootstrapping.");
+            HorusLog.Info("Bootstrap", $"{PluginName} v{PluginVersion}: AWAKE CALLED. Bootstrapping.");
 
             // Bind configurations
             HotkeyToggleMode = Config.Bind("Controls", "ToggleHorusMode", KeyCode.F9, "Key to toggle Horus Mode");
             HotkeyToggleUI = Config.Bind("Controls", "ToggleUI", KeyCode.F10, "Key to toggle the UI");
+            HotkeyDeselectUnit = Config.Bind("Controls", "DeselectUnit", KeyCode.Backspace, "Key to deselect the currently selected unit");
             UIScale = Config.Bind("UI", "UIScale", 1.0f, "Scale factor for the Horus UI (e.g. 1.0 for 1080p, 1.5 for 1440p, 2.0 for 4K)");
             AltitudeStep = Config.Bind("Placement", "AltitudeStep", 50f, "Altitude change per scroll tick with Ctrl+Scroll (meters)");
             AltitudeStepLarge = Config.Bind("Placement", "AltitudeStepLarge", 500f, "Altitude change per scroll tick with Ctrl+Shift+Scroll (meters)");
@@ -89,8 +85,6 @@ namespace HorusMod
             AllowScrollWhileMapOpen = Config.Bind("Placement", "AllowScrollWhileMapOpen", true, "Allow Ctrl/Alt+Scroll altitude/yaw shortcuts while the map is open (may also zoom the map)");
             InvertScrollDirection = Config.Bind("Placement", "InvertScrollDirection", false, "Invert the scroll wheel direction for altitude/yaw shortcuts");
             AllowDeletingNonHorusUnits = Config.Bind("Safety", "AllowDeletingNonHorusUnits", false, "If true, middle-click can delete real gameplay units NOT spawned by Horus (still never terrain/roads/map geometry/original-map units). Default false = only delete units spawned by Horus this session.");
-            AllowClientHorusRequests = Config.Bind("Multiplayer", "AllowClientHorusRequests", false, "Reserved: allow whitelisted multiplayer clients to request Horus actions (experimental, host-validated)");
-            EnableExperimentalWhitelist = Config.Bind("Multiplayer", "EnableExperimentalWhitelist", false, "Reserved: enable the experimental host-side client whitelist (planned)");
             AutoOceanSnapForShips = Config.Bind("Placement", "AutoOceanSnapForShips", true, "Automatically snap ships/ocean units to the water level (sea level).");
             OceanSnapActive = Config.Bind("Placement", "OceanSnapActive", false, "Manually force placement of all units to snap to the ocean level.");
             OceanHeightOverride = Config.Bind("Placement", "OceanHeightOverride", -9999f, "Manual override for the ocean level height. If -9999 (default), it uses the game's sea level.");
@@ -101,9 +95,6 @@ namespace HorusMod
             ShipSpawnLift = Config.Bind("Placement", "ShipSpawnLift", 3f, "Extra elevation lift for safe ship spawning to prevent dragging on the seabed (meters).");
             StabilizeShipsAfterSpawn = Config.Bind("Placement", "StabilizeShipsAfterSpawn", true, "Force-stabilize ship transforms and velocities for a few physics frames after spawning.");
             AllowDeletingOriginalMissionUnits = Config.Bind("Safety", "AllowDeletingOriginalMissionUnits", false, "If true, middle-click can delete original mission units (builtin map units).");
-            StartingBudgetPrimeva = Config.Bind("Budget", "StartingBudgetPrimeva", 5000f, "Starting budget for Primeva in RTS/Budget Mode");
-            StartingBudgetBoscali = Config.Bind("Budget", "StartingBudgetBoscali", 5000f, "Starting budget for Boscali in RTS/Budget Mode");
-
             // RTS Commander Mode config bindings
             AllowGroupPurchasesInRtsMode = Config.Bind("RTS", "AllowGroupPurchasesInRtsMode", false, "If true, allow group spawning in RTS Commander Mode (costs the sum of all units).");
             AllowSceneryPurchasesInRts = Config.Bind("RTS", "AllowSceneryPurchasesInRts", false, "If true, scenery objects cost budget in RTS Mode. If false, scenery is blocked.");
@@ -111,18 +102,14 @@ namespace HorusMod
             RequireDeploymentConfirmation = Config.Bind("RTS", "RequireDeploymentConfirmation", true, "If true, spawning in RTS Mode requires arming the deployment first (two-step).");
             AutoDisarmAfterPurchase = Config.Bind("RTS", "AutoDisarmAfterPurchase", true, "If true, deployment is automatically disarmed after a successful spawn in RTS Mode.");
             EnableRtsIncome = Config.Bind("RTS", "EnableRtsIncome", true, "If true, factions receive passive income every tick in RTS Mode.");
-            IncomeTickSeconds = Config.Bind("RTS", "IncomeTickSeconds", 5.0f, "Seconds between income ticks in RTS Mode.");
             EnableRtsUnitCap = Config.Bind("RTS", "EnableRtsUnitCap", true, "If true, enforce per-faction unit caps in RTS Mode.");
             SyncWithFactionBudget = Config.Bind("RTS", "SyncWithFactionBudget", false, "If true, the RTS budget is synced with the actual in-game faction budget instead of local Horus budget.");
             EnableStrictBaseDeployment = Config.Bind("RTS", "EnableStrictBaseDeployment", false, "If true, units can only be deployed within BaseDeploymentRadius of a friendly building/carrier.");
             BaseDeploymentRadius = Config.Bind("RTS", "BaseDeploymentRadius", 3000f, "Radius in meters for strict base deployment restriction.");
-
-            // Dedicated Server / Networking Configs
-            DedicatedServerBridgeEnabled = Config.Bind("Server", "DedicatedServerBridgeEnabled", false, "STUB: Enable dedicated server bridge.");
-            BindAddress = Config.Bind("Server", "BindAddress", "127.0.0.1", "STUB: Bind address for dedicated server network bridge.");
-            Port = Config.Bind("Server", "Port", 7780, "STUB: Port for dedicated server network bridge.");
-            AuthenticationToken = Config.Bind("Server", "AuthenticationToken", "", "STUB: Authentication token to restrict access.");
-            RateLimitPerSecond = Config.Bind("Server", "RateLimitPerSecond", 5, "STUB: Rate limit for command execution.");
+            LogVerbosity = Config.Bind("Diagnostics", "LogVerbosity", HorusLogLevel.Normal, "Quiet, Normal, Verbose, or Trace.");
+            ShowDebugTab = Config.Bind("Diagnostics", "ShowDebugTab", false, "Show the Debug tab and self-test diagnostics.");
+            HorusPrefs.Bind(Config);
+            GameApi.Initialize();
 
             try
             {
@@ -134,65 +121,16 @@ namespace HorusMod
                 {
                     var prefix = typeof(CameraFreeStatePatch).GetMethod(nameof(CameraFreeStatePatch.Prefix));
                     harmony.Patch(original, new HarmonyLib.HarmonyMethod(prefix));
-                    Logger.LogInfo($"{PluginName}: Harmony patch applied successfully.");
+                    HorusLog.Info("Bootstrap", $"{PluginName}: Harmony patch applied successfully.");
                 }
                 else
                 {
-                    Logger.LogError($"{PluginName}: Could not find CameraFreeState.UpdateState. Game may have updated.");
+                    HorusLog.Error("Bootstrap", $"{PluginName}: Could not find CameraFreeState.UpdateState. Game may have updated.");
                 }
             }
             catch (Exception ex)
             {
-                Logger.LogError($"{PluginName}: Failed to apply Harmony patch. Exception: {ex.Message}");
-            }
-
-            // Apply diagnostics Harmony patches
-            try
-            {
-                var diagHarmony = new HarmonyLib.Harmony(PluginGuid + ".diagnostics");
-
-                // Patch Unit.ReportKilled
-                var unitReportKilled = typeof(Unit).GetMethod("ReportKilled", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-                if (unitReportKilled != null)
-                {
-                    var prefix = typeof(UnitDiagnosticsPatch).GetMethod(nameof(UnitDiagnosticsPatch.PrefixReportKilled));
-                    diagHarmony.Patch(unitReportKilled, new HarmonyLib.HarmonyMethod(prefix));
-                    Logger.LogInfo("[HORUS DIAGNOSTICS] Patched Unit.ReportKilled successfully.");
-                }
-                else
-                {
-                    Logger.LogWarning("[HORUS DIAGNOSTICS] Could not find Unit.ReportKilled");
-                }
-
-                // Patch Ship.ReportKilled
-                var shipReportKilled = typeof(Ship).GetMethod("ReportKilled", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-                if (shipReportKilled != null)
-                {
-                    var prefix = typeof(UnitDiagnosticsPatch).GetMethod(nameof(UnitDiagnosticsPatch.PrefixShipReportKilled));
-                    diagHarmony.Patch(shipReportKilled, new HarmonyLib.HarmonyMethod(prefix));
-                    Logger.LogInfo("[HORUS DIAGNOSTICS] Patched Ship.ReportKilled successfully.");
-                }
-                else
-                {
-                    Logger.LogWarning("[HORUS DIAGNOSTICS] Could not find Ship.ReportKilled");
-                }
-
-                // Patch Ship.CheckShipBuoyancy
-                var checkShipBuoyancy = typeof(Ship).GetMethod("CheckShipBuoyancy", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-                if (checkShipBuoyancy != null)
-                {
-                    var prefix = typeof(UnitDiagnosticsPatch).GetMethod(nameof(UnitDiagnosticsPatch.PrefixCheckShipBuoyancy));
-                    diagHarmony.Patch(checkShipBuoyancy, new HarmonyLib.HarmonyMethod(prefix));
-                    Logger.LogInfo("[HORUS DIAGNOSTICS] Patched Ship.CheckShipBuoyancy successfully.");
-                }
-                else
-                {
-                    Logger.LogWarning("[HORUS DIAGNOSTICS] Could not find Ship.CheckShipBuoyancy");
-                }
-            }
-            catch (Exception ex)
-            {
-                Logger.LogError($"[HORUS DIAGNOSTICS] Failed to apply diagnostics patches: {ex.Message}");
+                HorusLog.Error("Bootstrap", $"{PluginName}: Failed to apply Harmony patch. Exception: {ex.Message}");
             }
 
             var go = new GameObject("HorusModManager");
@@ -230,31 +168,4 @@ namespace HorusMod
         }
     }
 
-    public static class UnitDiagnosticsPatch
-    {
-        public static bool PrefixReportKilled(Unit __instance)
-        {
-            if (__instance != null && (__instance is Ship || __instance.GetComponent<Ship>() != null || __instance.GetComponentInChildren<Ship>(true) != null))
-            {
-                UnityEngine.Debug.LogWarning($"[HORUS SHIP DEATH] Unit.ReportKilled called for Ship '{__instance.unitName}'");
-                UnityEngine.Debug.LogWarning(Environment.StackTrace);
-            }
-            return true;
-        }
-
-        public static bool PrefixShipReportKilled(Ship __instance)
-        {
-            if (__instance != null)
-            {
-                UnityEngine.Debug.LogWarning($"[HORUS SHIP DEATH] Ship.ReportKilled called for '{__instance.unitName}'");
-                UnityEngine.Debug.LogWarning(Environment.StackTrace);
-            }
-            return true;
-        }
-
-        public static bool PrefixCheckShipBuoyancy(Ship __instance)
-        {
-            return true;
-        }
-    }
 }

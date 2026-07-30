@@ -2,6 +2,8 @@ using UnityEngine;
 using NuclearOption.Networking;
 using Mirage;
 using System.Collections.Generic;
+using HorusMod.UI;
+using HorusMod.Logging;
 
 namespace HorusMod.Core
 {
@@ -12,7 +14,7 @@ namespace HorusMod.Core
             // Permission gate.
             if (!Networking.HorusPermissions.CanDelete())
             {
-                HorusPlugin.Logger.LogWarning("Horus: host permission required. Delete blocked.");
+                HorusLog.Warning("Delete", "Horus: host permission required. Delete blocked.");
                 return;
             }
 
@@ -56,7 +58,7 @@ namespace HorusMod.Core
 
             if (unitToDelete == null)
             {
-                HorusPlugin.Logger.LogInfo("Horus: No unit found to delete (direct click or within range).");
+                HorusLog.Info("Delete", "Horus: No unit found to delete (direct click or within range).");
                 return;
             }
 
@@ -72,7 +74,7 @@ namespace HorusMod.Core
                 {
                     reason = "not spawned by Horus (enable Safety/AllowDeletingNonHorusUnits to remove)";
                 }
-                HorusPlugin.Logger.LogInfo($"Horus: target is not deletable ({reason}): '{unitToDelete.unitName}'.");
+                HorusLog.Info("Delete", $"Horus: target is not deletable ({reason}): '{unitToDelete.unitName}'.");
                 return;
             }
 
@@ -92,17 +94,18 @@ namespace HorusMod.Core
                 if (Networking.HorusPermissions.IsMultiplayer())
                 {
                     NetworkServer.Destroy(go);
-                    HorusPlugin.Logger.LogInfo($"Horus (Host): Server-destroyed unit '{unitName}'.");
+                    HorusLog.Info("Delete", $"Horus (Host): Server-destroyed unit '{unitName}'.");
                 }
                 else
                 {
                     UnityEngine.Object.Destroy(go);
-                    HorusPlugin.Logger.LogInfo($"Horus (Local): Local-destroyed unit '{unitName}'.");
+                    HorusLog.Info("Delete", $"Horus (Local): Local-destroyed unit '{unitName}'.");
                 }
+                HorusToasts.Show($"Deleted {unitName}");
             }
             catch (System.Exception e)
             {
-                HorusPlugin.Logger.LogError($"Horus: Exception while destroying unit '{unitName}': {e.Message}");
+                HorusLog.Error("Delete", $"Horus: Exception while destroying unit '{unitName}': {e.Message}");
             }
         }
     }

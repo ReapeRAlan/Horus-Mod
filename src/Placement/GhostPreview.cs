@@ -1,5 +1,6 @@
 using System;
 using UnityEngine;
+using HorusMod.Logging;
 using UnityEngine.Rendering;
 
 namespace HorusMod.Placement
@@ -44,7 +45,7 @@ namespace HorusMod.Placement
 
             if (def == null || def.unitPrefab == null)
             {
-                HorusPlugin.Logger.LogWarning("GhostPreview: selected unit has no prefab; preview skipped.");
+                HorusLog.Warning("Ghost", "GhostPreview: selected unit has no prefab; preview skipped.");
                 return false;
             }
 
@@ -69,7 +70,7 @@ namespace HorusMod.Placement
             }
             catch (Exception ex)
             {
-                HorusPlugin.Logger.LogError($"GhostPreview: failed to build ghost for '{def.unitName}': {ex.Message}");
+                HorusLog.Error("Ghost", $"GhostPreview: failed to build ghost for '{def.unitName}': {ex.Message}");
                 Clear();
                 return false;
             }
@@ -109,7 +110,7 @@ namespace HorusMod.Placement
             }
             catch (Exception ex)
             {
-                HorusPlugin.Logger.LogError($"GhostPreview: failed to build group ghosts: {ex.Message}");
+                HorusLog.Error("Ghost", $"GhostPreview: failed to build group ghosts: {ex.Message}");
                 Clear();
                 return false;
             }
@@ -218,7 +219,7 @@ namespace HorusMod.Placement
             catch (Exception ex)
             {
                 // RequireComponent or similar may refuse a removal; non-fatal for a preview.
-                HorusPlugin.Logger.LogWarning($"GhostPreview: could not strip {c.GetType().Name}: {ex.Message}");
+                HorusLog.Warning("Ghost", $"GhostPreview: could not strip {c.GetType().Name}: {ex.Message}");
             }
         }
 
@@ -246,7 +247,7 @@ namespace HorusMod.Placement
                 }
                 catch (Exception ex)
                 {
-                    HorusPlugin.Logger.LogWarning($"GhostPreview: could not tint a renderer: {ex.Message}");
+                    HorusLog.Warning("Ghost", $"GhostPreview: could not tint a renderer: {ex.Message}");
                 }
             }
         }

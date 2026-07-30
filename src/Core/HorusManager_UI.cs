@@ -7,60 +7,74 @@ using Mirage;
 using HorusMod.Networking;
 using HorusMod.Placement;
 using HorusMod.Economy;
+using HorusMod.Diagnostics;
+using HorusMod.Logging;
+using HorusMod.UI;
+using HorusMod.Data;
+using HorusMod.Compat;
 
 namespace HorusMod.Core
 {
     public partial class HorusManager : MonoBehaviour
     {
-        private bool hasLoggedDrawHorusWindow = false;
+        private static readonly string[] logLevelNames = { "Quiet", "Normal", "Verbose", "Trace" };
+        private static readonly string[] modeNames = { "Sandbox Mode", "RTS Commander Mode" };
+        private static readonly string[] gridLabels = { "1m", "5m", "10m", "25m", "50m", "100m" };
+        private static readonly string[] rotationLabels = { "1°", "5°", "15°", "45°", "90°" };
+        private static readonly string[] deleteLabels = { "25m", "50m", "100m" };
+        private static readonly string[] liveryModeNames = { "Default", "Faction Default", "Random", "Specific" };
+        private static readonly string[] loadoutModeNames = { "Default", "Standard Preset", "Random Standard Preset" };
+        private AircraftParameters cachedAircraftOptions;
+        private string[] cachedLiveryNames;
+        private string[] cachedLoadoutNames;
+
+        internal void DrawPlaceConfiguration()
+        {
+            GUILayout.Space(4f);
+            if (Section("Placement", ref showPlacementTools)) DrawPlacementToolsSection();
+            if (ArmedDefinition is AircraftDefinition && Section("Aircraft options", ref showAircraftCustomizationTools))
+                DrawAircraftCustomizationSection();
+            if (Section("Groups & formations", ref showGroupTools)) DrawGroupsSection();
+        }
+
+        internal void DrawManageConfiguration()
+        {
+            GUILayout.Label($"Selection: {(WorldSelection != null ? WorldSelection.Count : 0)}", HorusTheme.TitleText);
+            GUILayout.BeginHorizontal();
+            GUI.enabled = WorldSelection != null && WorldSelection.HasSelection;
+            if (HorusWidgets.Secondary("Focus (F)")) FocusSelection();
+            if (HorusWidgets.Secondary("Duplicate (Ctrl+D)")) DuplicateSelection();
+            if (HorusWidgets.Danger("Delete (Del)")) DeleteSelection();
+            GUI.enabled = true;
+            GUILayout.EndHorizontal();
+            if (WorldSelection != null)
+                foreach (Unit unit in WorldSelection.Units)
+                    if (unit != null) GUILayout.Label($"• {unit.unitName}", HorusTheme.LabelSmall);
+            GUILayout.Space(8f);
+            GUILayout.Label("DANGER ZONE", HorusTheme.TitleText);
+            DrawSafeDeleteSection();
+        }
+
+        internal void DrawRtsConfiguration()
+        {
+            DrawStatusModeSection();
+            DrawRtsCommanderUI();
+            DrawRtsFactoriesUI();
+        }
+
+        internal void DrawSettingsConfiguration()
+        {
+            DrawSettingsSection();
+        }
+
+        internal void DrawDebugConfiguration()
+        {
+            DrawDebugSection();
+        }
+
         private void DrawHorusWindow(int windowID)
         {
-            if (!hasLoggedDrawHorusWindow)
-            {
-                HorusPlugin.Logger.LogInfo("[HORUS DEBUG] DrawHorusWindow called");
-                hasLoggedDrawHorusWindow = true;
-            }
-            mainScroll = GUILayout.BeginScrollView(mainScroll);
-
-            DrawStatusModeSection();
-            DrawUnitSelectionSection();
-
-            GUILayout.Space(5);
-            if (Section("Placement Tools", ref showPlacementTools))
-                DrawPlacementToolsSection();
-
-            GUILayout.Space(5);
-            if (Section("Spawn Actions", ref showControls))
-                DrawSpawnActionsSection();
-
-            GUILayout.Space(5);
-            if (Section("Map Spawn", ref showMapTools))
-                DrawMapSpawnSection();
-
-            GUILayout.Space(5);
-            if (Section("Groups & Formations", ref showGroupTools))
-                DrawGroupsSection();
-
-            if (economyManager != null && economyManager.CurrentMode == HorusMode.RtsCommander)
-            {
-                DrawRtsCommanderUI();
-                DrawRtsFactoriesUI();
-            }
-
-            GUILayout.Space(5);
-            if (Section("Safe Delete", ref showDeletionTools))
-                DrawSafeDeleteSection();
-
-            GUILayout.Space(5);
-            if (Section("Settings / UI", ref showSettingsTools))
-                DrawSettingsSection();
-
-            GUILayout.Space(5);
-            if (Section("Debug / Diagnostics", ref showDebugTools))
-                DrawDebugSection();
-
-            GUILayout.EndScrollView();
-            GUI.DragWindow();
+            HorusWindowRoot.Draw(this, windowID);
         }
 
         private static bool Section(string title, ref bool open)
@@ -127,102 +141,48 @@ namespace HorusMod.Core
             // --- Economy Mode Selector ---
             GUILayout.Space(5);
             int oldMode = (economyManager != null && economyManager.CurrentMode == HorusMode.RtsCommander) ? 1 : 0;
-            int newMode = GUILayout.SelectionGrid(oldMode, new string[] { "Sandbox Mode", "RTS Commander Mode" }, 2);
+            int newMode = GUILayout.SelectionGrid(oldMode, modeNames, 2);
             if (newMode != oldMode && economyManager != null)
             {
                 if (newMode == 1)
                 {
                     economyManager.CurrentMode = HorusMode.RtsCommander;
                     economyManager.InitializeMatch();
-                    HorusPlugin.Logger.LogInfo("[RTS Economy] Switched to RTS Commander Mode.");
+                    HorusLog.Info("UI", "[RTS Economy] Switched to RTS Commander Mode.");
                 }
                 else
                 {
                     economyManager.CurrentMode = HorusMode.Sandbox;
                     economyManager.ResetMatch();
-                    HorusPlugin.Logger.LogInfo("[RTS Economy] Switched to Sandbox Mode.");
+                    HorusLog.Info("UI", "[RTS Economy] Switched to Sandbox Mode.");
                 }
             }
             
             // Helper text
-            if (newMode == 0) GUILayout.Label("Sandbox: Free spawning, no budget.", new GUIStyle(GUI.skin.label) { fontSize = 11 });
-            else GUILayout.Label("RTS Commander: Units cost money. Factories produce units.", new GUIStyle(GUI.skin.label) { fontSize = 11 });
-        }
-
-        private void DrawUnitSelectionSection()
-        {
-            GUILayout.Space(5);
-            GUILayout.Box("══ UNIT SELECTION ══");
-
-            var factions = FactionRegistry.factions;
-            if (factions == null || factions.Count == 0)
-            {
-                GUILayout.Label("Status: No playable factions found.");
-            }
-            else
-            {
-                if (selectedFactionIndex > factions.Count) selectedFactionIndex = 0; // > because Count is the index for Neutral
-                List<string> factionNames = factions.Select(f => f.factionName).ToList();
-                factionNames.Add("Neutral (Unassigned)");
-                selectedFactionIndex = GUILayout.SelectionGrid(selectedFactionIndex, factionNames.ToArray(), 2);
-            }
-
-            GUILayout.Space(5);
-            string[] categories = { "Aircraft", "Vehicles", "Ships", "Buildings", "Scenery" };
-            int oldCat = selectedCategoryIndex;
-            selectedCategoryIndex = GUILayout.SelectionGrid(selectedCategoryIndex, categories, 3);
-            if (oldCat != selectedCategoryIndex)
-            {
-                selectedUnitIndex = 0;
-                cachedCategoryIndex = -1;
-                if (selectedCategoryIndex == 0) { spawnAltitude = 3000f; }
-                else { spawnAltitude = 0f; }
-                altitudeInputText = spawnAltitude.ToString("0");
-                armedFactoryPresetName = null;
-                ghost.Clear();
-            }
-
-            List<UnitDefinition> currentList = GetCurrentList();
-            GUILayout.Space(5);
-            GUILayout.Label($"Unit to Spawn: ({currentList.Count})");
-            scrollPosition = GUILayout.BeginScrollView(scrollPosition, GUILayout.Height(150));
-            if (currentList != null && currentList.Count > 0)
-            {
-                string[] unitNames = currentList.Select(u => u.unitName).ToArray();
-                if (selectedUnitIndex >= currentList.Count) selectedUnitIndex = 0;
-                int oldUnitIndex = selectedUnitIndex;
-                selectedUnitIndex = GUILayout.SelectionGrid(selectedUnitIndex, unitNames, 1);
-                if (selectedUnitIndex != oldUnitIndex)
-                {
-                    armedFactoryPresetName = null;
-                    ghost.Clear();
-                }
-            }
-            else
-            {
-                GUILayout.Label("No units in this category.");
-            }
-            GUILayout.EndScrollView();
+            if (newMode == 0) GUILayout.Label("Sandbox: Free spawning, no budget.", HorusTheme.LabelMuted);
+            else GUILayout.Label("RTS Commander: Units cost money. Factories produce units.", HorusTheme.LabelMuted);
         }
 
         private void DrawPlacementToolsSection()
         {
+            Vector2 altitudeRange = GetAltitudeRange();
+
             // Quick Actions
             GUILayout.BeginHorizontal();
-            if (GUILayout.Button("Reset Altitude")) { spawnAltitude = 0f; altitudeInputText = "0"; }
+            if (GUILayout.Button("Reset Altitude")) SetSpawnAltitude(0f);
             if (GUILayout.Button("Reset Yaw")) { spawnYaw = 0f; yawInputText = "0"; }
-            if (GUILayout.Button("Reset Window")) { windowRect = new Rect(20, 20, 340, 700); }
+            if (GUILayout.Button("Reset Window")) windowRect = HorusPrefs.ResetWindow();
             GUILayout.EndHorizontal();
 
             // Altitude & Yaw sliders
             GUILayout.Space(5);
             GUILayout.Label($"Altitude: {spawnAltitude:F0} m  |  Yaw: {spawnYaw:F0}°");
 
-            float newAlt = GUILayout.HorizontalSlider(spawnAltitude, 0f, 15000f);
+            GUILayout.Label($"Native range: {altitudeRange.x:F0}–{altitudeRange.y:F0} m", HorusTheme.LabelMuted);
+            float newAlt = GUILayout.HorizontalSlider(spawnAltitude, altitudeRange.x, altitudeRange.y);
             if (Mathf.Abs(newAlt - spawnAltitude) > 0.01f)
             {
-                spawnAltitude = Mathf.Round(newAlt / 50f) * 50f;
-                altitudeInputText = spawnAltitude.ToString("0");
+                SetSpawnAltitude(Mathf.Round(newAlt / 50f) * 50f);
             }
             GUILayout.BeginHorizontal();
             GUILayout.Label("Alt:", GUILayout.Width(30));
@@ -231,8 +191,7 @@ namespace HorusMod.Core
             {
                 if (float.TryParse(altitudeInputText, out float parsed))
                 {
-                    spawnAltitude = Mathf.Clamp(parsed, 0f, 50000f);
-                    altitudeInputText = spawnAltitude.ToString("0");
+                    SetSpawnAltitude(parsed);
                 }
             }
             GUILayout.Label("Yaw:", GUILayout.Width(30));
@@ -248,10 +207,10 @@ namespace HorusMod.Core
             GUILayout.EndHorizontal();
 
             GUILayout.BeginHorizontal();
-            if (GUILayout.Button("0m")) { spawnAltitude = 0f; altitudeInputText = "0"; }
-            if (GUILayout.Button("1k")) { spawnAltitude = 1000f; altitudeInputText = "1000"; }
-            if (GUILayout.Button("3k")) { spawnAltitude = 3000f; altitudeInputText = "3000"; }
-            if (GUILayout.Button("5k")) { spawnAltitude = 5000f; altitudeInputText = "5000"; }
+            if (GUILayout.Button("0m")) SetSpawnAltitude(0f);
+            if (GUILayout.Button("1k")) SetSpawnAltitude(1000f);
+            if (GUILayout.Button("3k")) SetSpawnAltitude(3000f);
+            if (GUILayout.Button("5k")) SetSpawnAltitude(5000f);
             GUILayout.EndHorizontal();
 
             GUILayout.Space(3);
@@ -272,12 +231,12 @@ namespace HorusMod.Core
             // Toggles
             GUILayout.Space(5);
             ghostPreviewEnabled = GUILayout.Toggle(ghostPreviewEnabled, " Ghost Preview");
-            GUILayout.Label("Shows where the unit will spawn before placing it.", new GUIStyle(GUI.skin.label) { fontSize = 11 });
+            GUILayout.Label("Shows where the unit will spawn before placing it.", HorusTheme.LabelMuted);
             
             bool prevStationary = spawnStationary;
             spawnStationary = GUILayout.Toggle(spawnStationary, " Spawn Ground Units Stationary");
             if (spawnStationary != prevStationary) HorusPlugin.SpawnGroundUnitsStationary.Value = spawnStationary;
-            GUILayout.Label("Ground units and ships will hold position after spawning.", new GUIStyle(GUI.skin.label) { fontSize = 11 });
+            GUILayout.Label("Ground units and ships will hold position after spawning.", HorusTheme.LabelMuted);
 
             snapToGround = GUILayout.Toggle(snapToGround, " Snap to Ground");
             alignToSurface = GUILayout.Toggle(alignToSurface, " Align to Surface Normal");
@@ -289,7 +248,6 @@ namespace HorusMod.Core
             if (gridSnapEnabled)
             {
                 int gi = IndexOf(gridSizeOptions, gridSize);
-                string[] gridLabels = { "1m", "5m", "10m", "25m", "50m", "100m" };
                 int newGi = GUILayout.SelectionGrid(gi < 0 ? 2 : gi, gridLabels, 3);
                 if (newGi != gi && newGi >= 0 && newGi < gridSizeOptions.Length)
                 {
@@ -303,8 +261,7 @@ namespace HorusMod.Core
             if (rotationSnapEnabled)
             {
                 int ri = IndexOf(rotationSnapOptions, rotationSnapStep);
-                string[] rotLabels = { "1°", "5°", "15°", "45°", "90°" };
-                int newRi = GUILayout.SelectionGrid(ri < 0 ? 2 : ri, rotLabels, 5);
+                int newRi = GUILayout.SelectionGrid(ri < 0 ? 2 : ri, rotationLabels, 5);
                 if (newRi != ri && newRi >= 0 && newRi < rotationSnapOptions.Length)
                 {
                     rotationSnapStep = rotationSnapOptions[newRi];
@@ -312,34 +269,6 @@ namespace HorusMod.Core
                     yawInputText = spawnYaw.ToString("0");
                 }
             }
-        }
-
-        private void DrawSpawnActionsSection()
-        {
-            GUILayout.Label("Left Click: Spawn");
-            GUILayout.Label("Mid Click: Delete");
-            GUILayout.Label("Ctrl+Scroll: Altitude");
-            GUILayout.Label("Alt+Scroll: Yaw");
-            GUILayout.Label("Shift: Larger step (with Ctrl/Alt)");
-            GUILayout.Label("RMB: Camera look  |  WASD/QE: Move");
-            GUILayout.Space(5);
-            GUILayout.Label("Hint: Press Ctrl+F10 to emergency reset UI.", new GUIStyle(GUI.skin.label) { fontSize = 11 });
-        }
-
-        private void DrawMapSpawnSection()
-        {
-            string mapBtnLabel = mapSpawnMode ? "■ Map Spawn: ON" : "▶ Map Spawn: OFF";
-            if (GUILayout.Button(mapBtnLabel, GUILayout.Height(30)))
-            {
-                if (mapSpawnMode) ExitMapSpawnMode();
-                else EnterMapSpawnMode();
-            }
-            if (mapSpawnMode)
-            {
-                GUILayout.Label("Left-click the map to spawn at the cursor.");
-                GUILayout.Label("Press M to open/close the map.");
-            }
-            GUILayout.Label("Open the map and click to place units.", new GUIStyle(GUI.skin.label) { fontSize = 11 });
         }
 
         private void DrawGroupsSection()
@@ -352,16 +281,18 @@ namespace HorusMod.Core
                 ghost.Clear();
             }
 
-            GUILayout.Label("Spawns multiple units. Disabled by default.", new GUIStyle(GUI.skin.label) { fontSize = 11 });
+            GUILayout.Label("Spawns multiple units. Disabled by default.", HorusTheme.LabelMuted);
 
             if (!enableGroupSpawn) return;
 
             GUILayout.Label("Preset Group:");
+            string[] presetNames = GetGroupPresetNames();
             int oldPreset = selectedGroupPresetIndex;
-            selectedGroupPresetIndex = GUILayout.SelectionGrid(selectedGroupPresetIndex, groupPresetNames, 3);
+            selectedGroupPresetIndex = GUILayout.SelectionGrid(selectedGroupPresetIndex, presetNames, 2);
             if (oldPreset != selectedGroupPresetIndex) OnGroupPresetChanged(oldPreset, selectedGroupPresetIndex);
 
-            if (selectedGroupPresetIndex == 8)
+            int customPresetIndex = presetNames.Length - 1;
+            if (selectedGroupPresetIndex == customPresetIndex)
             {
                 GUILayout.Space(5);
                 GUILayout.Box("CUSTOM GROUP EDITOR");
@@ -431,8 +362,23 @@ namespace HorusMod.Core
             }
             else
             {
-                GUILayout.Label($"Unit Count: {groupCount}");
-                groupCount = Mathf.Clamp(Mathf.RoundToInt(GUILayout.HorizontalSlider(groupCount, 1f, 20f)), 1, 20);
+                if (TryGetSelectedConvoy(out Faction.ConvoyGroup convoy))
+                {
+                    GUILayout.Label($"Native faction preset · {groupCount} units · {convoy.GetCost():N0} credits", HorusTheme.LabelMuted);
+                    if (convoy.Constituents != null)
+                    {
+                        foreach (Faction.ConvoyUnit constituent in convoy.Constituents)
+                        {
+                            if (constituent?.Type != null)
+                                GUILayout.Label($"{constituent.Count}× {constituent.Type.unitName}", HorusTheme.LabelSmall);
+                        }
+                    }
+                }
+                else
+                {
+                    GUILayout.Label($"Unit Count: {groupCount}");
+                    groupCount = Mathf.Clamp(Mathf.RoundToInt(GUILayout.HorizontalSlider(groupCount, 1f, 20f)), 1, 20);
+                }
 
                 GUILayout.Label($"Spacing: {groupSpacing:F0}m");
                 float newSp = GUILayout.HorizontalSlider(groupSpacing, 5f, 200f);
@@ -472,11 +418,13 @@ namespace HorusMod.Core
             }
             
             GUILayout.Space(5);
-            GUILayout.Label("Middle-click a unit to delete it.", new GUIStyle(GUI.skin.label) { fontSize = 11, normal = { textColor = new Color(1f, 0.7f, 0.7f) } });
+            Color deleteHintColor = GUI.contentColor;
+            GUI.contentColor = HorusTheme.Danger;
+            GUILayout.Label("Middle-click a unit to delete it.", HorusTheme.LabelMuted);
+            GUI.contentColor = deleteHintColor;
             GUILayout.Label($"Delete Search Range: {deleteRange:F0}m");
             
             int di = IndexOf(deleteRangeOptions, deleteRange);
-            string[] deleteLabels = { "25m", "50m", "100m" };
             int newDi = GUILayout.SelectionGrid(di < 0 ? 1 : di, deleteLabels, 3);
             if (newDi != di && newDi >= 0 && newDi < deleteRangeOptions.Length)
             {
@@ -499,8 +447,127 @@ namespace HorusMod.Core
             GUILayout.EndHorizontal();
         }
 
+        private void DrawAircraftCustomizationSection()
+        {
+            GUILayout.Box("══ AIRCRAFT CUSTOMIZATION (Patch 0.33.4) ══");
+
+            UnitDefinition selectedDef = GetSelectedDefinition();
+            if (selectedDef == null)
+            {
+                GUILayout.Label("No unit selected. Select an aircraft to customize.");
+                return;
+            }
+
+            AircraftDefinition acDef = selectedDef as AircraftDefinition;
+            AircraftParameters acParams = acDef != null ? acDef.aircraftParameters : null;
+
+            if (acParams == null && selectedDef.unitPrefab != null)
+            {
+                Aircraft acComp = selectedDef.unitPrefab.GetComponent<Aircraft>();
+                if (acComp != null && acComp.definition is AircraftDefinition acDef2)
+                {
+                    acParams = acDef2.aircraftParameters;
+                }
+            }
+
+            if (acParams == null)
+            {
+                Color prevC = GUI.color;
+                GUI.color = Color.yellow;
+                GUILayout.Label("Selected unit is not an aircraft. Equipment customization is aircraft-only.");
+                GUI.color = prevC;
+                return;
+            }
+
+            // --- Livery Selection ---
+            GUILayout.Space(5);
+            GUILayout.Label("Livery Mode:");
+            int currentLiveryMode = (int)aircraftLiveryMode;
+
+            if (acParams.liveries == null || acParams.liveries.Count == 0)
+            {
+                aircraftLiveryMode = AircraftLiveryMode.Default;
+                GUILayout.Label("No aircraft liveries available for this unit.");
+            }
+            else
+            {
+                int newLiveryMode = GUILayout.SelectionGrid(currentLiveryMode, liveryModeNames, 2);
+                if (newLiveryMode != currentLiveryMode)
+                {
+                    aircraftLiveryMode = (AircraftLiveryMode)newLiveryMode;
+                }
+
+                if (aircraftLiveryMode == AircraftLiveryMode.Specific)
+                {
+                    GUILayout.Label($"Specific Livery ({acParams.liveries.Count}):");
+                    EnsureAircraftOptionNames(acParams);
+                    if (selectedLiveryIndex >= acParams.liveries.Count) selectedLiveryIndex = 0;
+                    selectedLiveryIndex = GUILayout.SelectionGrid(selectedLiveryIndex, cachedLiveryNames, 1);
+                }
+            }
+
+            // --- Loadout Selection ---
+            GUILayout.Space(5);
+            GUILayout.Label("Loadout Mode:");
+            int currentLoadoutMode = (int)aircraftLoadoutMode;
+
+            if (acParams.StandardLoadouts == null || acParams.StandardLoadouts.Length == 0)
+            {
+                aircraftLoadoutMode = AircraftLoadoutMode.Default;
+                GUILayout.Label("No standard loadouts available for this unit.");
+            }
+            else
+            {
+                int newLoadoutMode = GUILayout.SelectionGrid(currentLoadoutMode, loadoutModeNames, 2);
+                if (newLoadoutMode != currentLoadoutMode)
+                {
+                    aircraftLoadoutMode = (AircraftLoadoutMode)newLoadoutMode;
+                }
+
+                if (aircraftLoadoutMode == AircraftLoadoutMode.StandardPreset)
+                {
+                    GUILayout.Label($"Standard Loadout Preset ({acParams.StandardLoadouts.Length}):");
+                    EnsureAircraftOptionNames(acParams);
+                    if (selectedStandardLoadoutIndex >= acParams.StandardLoadouts.Length) selectedStandardLoadoutIndex = 0;
+                    selectedStandardLoadoutIndex = GUILayout.SelectionGrid(selectedStandardLoadoutIndex, cachedLoadoutNames, 1);
+                }
+            }
+
+            GUILayout.Space(5);
+            GUILayout.Label($"Pilot skill: {selectedAircraftSkill:P0}");
+            selectedAircraftSkill = GUILayout.HorizontalSlider(selectedAircraftSkill, 0f, 1f);
+            GUILayout.Space(5);
+            applyCustomizationToGroups = GUILayout.Toggle(applyCustomizationToGroups, "Apply customization to group spawns");
+        }
+
+        private void EnsureAircraftOptionNames(AircraftParameters parameters)
+        {
+            int liveryCount = parameters?.liveries?.Count ?? 0;
+            int loadoutCount = parameters?.StandardLoadouts?.Length ?? 0;
+            if (cachedAircraftOptions == parameters &&
+                cachedLiveryNames?.Length == liveryCount &&
+                cachedLoadoutNames?.Length == loadoutCount) return;
+
+            cachedAircraftOptions = parameters;
+            cachedLiveryNames = new string[liveryCount];
+            for (int i = 0; i < liveryCount; i++)
+                cachedLiveryNames[i] = $"{i}: {(string.IsNullOrEmpty(parameters.liveries[i].name) ? "Livery " + i : parameters.liveries[i].name)}";
+            cachedLoadoutNames = new string[loadoutCount];
+            for (int i = 0; i < loadoutCount; i++)
+                cachedLoadoutNames[i] = $"{i}: {(string.IsNullOrEmpty(parameters.StandardLoadouts[i].Name) ? "Preset " + i : parameters.StandardLoadouts[i].Name)}";
+        }
+
         private void DrawSettingsSection()
         {
+            GUILayout.Label("Diagnostics", HorusTheme.TitleText);
+            HorusPlugin.ShowDebugTab.Value = GUILayout.Toggle(HorusPlugin.ShowDebugTab.Value, "Show Debug tab");
+            GUILayout.Label("Log verbosity", HorusTheme.LabelMuted);
+            int logLevel = GUILayout.SelectionGrid((int)HorusPlugin.LogVerbosity.Value,
+                logLevelNames, 4);
+            HorusPlugin.LogVerbosity.Value = (HorusLogLevel)logLevel;
+
+            GUILayout.Space(8f);
+            GUILayout.Label("Interface", HorusTheme.TitleText);
             GUILayout.Label($"UI Scale: {HorusPlugin.UIScale.Value:F2}x");
             float newScale = GUILayout.HorizontalSlider(HorusPlugin.UIScale.Value, 0.5f, 2.5f);
             if (Mathf.Abs(newScale - HorusPlugin.UIScale.Value) > 0.05f)
@@ -511,16 +578,15 @@ namespace HorusMod.Core
             GUILayout.Space(5);
             if (GUILayout.Button("Reset Window Position"))
             {
-                windowRect = new Rect(20, 20, 340, 700);
+                windowRect = HorusPrefs.ResetWindow();
             }
-            GUILayout.Label("Hint: Press Ctrl+F10 to emergency reset UI.", new GUIStyle(GUI.skin.label) { fontSize = 11 });
-            
-            GUILayout.Space(5);
-            GUILayout.Label("Advanced Mode: Under Construction", new GUIStyle(GUI.skin.label) { fontSize = 11 });
+            GUILayout.Label("Hint: Press Ctrl+F10 to emergency reset UI.", HorusTheme.LabelMuted);
         }
 
         private void DrawDebugSection()
         {
+            DrawSelfTestPanel();
+            GUILayout.Space(8f);
             GUILayout.Label($"Horus Version: {HorusPlugin.PluginVersion}");
             GUILayout.Label($"Current Mode: {HorusPermissions.GetModeLabel()}");
             GUILayout.Label($"Current Scene: {UnityEngine.SceneManagement.SceneManager.GetActiveScene().name}");
@@ -538,18 +604,21 @@ namespace HorusMod.Core
             GUILayout.Label($"Last Blocked Action: {lastBlockedAction}");
             GUILayout.Label($"Last Lifecycle Event: {lastLifecycleEvent}");
             
-            GUILayout.Label($"Command Executor Mode: local");
+            GUILayout.Space(5);
+            GUILayout.Label("--- Performance & Throttling (0.33.4) ---");
+            GUILayout.Label(HorusPerformanceTracker.GetDiagnosticSummary());
+            GUILayout.Space(5);
 
             if (GUILayout.Button("Print Diagnostics to Log"))
             {
-                HorusPlugin.Logger.LogInfo("--- Horus Diagnostics ---");
-                HorusPlugin.Logger.LogInfo($"Version: {HorusPlugin.PluginVersion}");
-                HorusPlugin.Logger.LogInfo($"Mode: {HorusPermissions.GetModeLabel()}");
-                HorusPlugin.Logger.LogInfo($"Current Scene: {UnityEngine.SceneManagement.SceneManager.GetActiveScene().name}");
-                HorusPlugin.Logger.LogInfo($"Economy Mode: {(economyManager?.CurrentMode.ToString())}");
-                HorusPlugin.Logger.LogInfo($"Units spawned: {horusSpawnedUnits.Count}");
-                HorusPlugin.Logger.LogInfo($"Scene reloads: {sceneReloadCount}");
-                HorusPlugin.Logger.LogInfo($"Instance ID: {horusManagerInstanceId}");
+                HorusLog.Info("UI", "--- Horus Diagnostics ---");
+                HorusLog.Info("UI", $"Version: {HorusPlugin.PluginVersion}");
+                HorusLog.Info("UI", $"Mode: {HorusPermissions.GetModeLabel()}");
+                HorusLog.Info("UI", $"Current Scene: {UnityEngine.SceneManagement.SceneManager.GetActiveScene().name}");
+                HorusLog.Info("UI", $"Economy Mode: {(economyManager?.CurrentMode.ToString())}");
+                HorusLog.Info("UI", $"Units spawned: {horusSpawnedUnits.Count}");
+                HorusLog.Info("UI", $"Scene reloads: {sceneReloadCount}");
+                HorusLog.Info("UI", $"Instance ID: {horusManagerInstanceId}");
             }
             
             if (GUILayout.Button("Reset UI"))
@@ -588,7 +657,7 @@ namespace HorusMod.Core
                 int before = horusSpawnedUnits.Count;
                 horusSpawnedUnits.RemoveWhere(u => u == null);
                 int after = horusSpawnedUnits.Count;
-                HorusPlugin.Logger.LogInfo($"Cleared {before - after} stale spawned unit references.");
+                HorusLog.Info("UI", $"Cleared {before - after} stale spawned unit references.");
                 if (SceneSingleton<GameplayUI>.i != null) SceneSingleton<GameplayUI>.i.GameMessage($"Horus: Cleared {before - after} stale refs.");
             }
 
@@ -598,18 +667,52 @@ namespace HorusMod.Core
             }
         }
 
+        private void DrawSelfTestPanel()
+        {
+            UnitCatalog.EnsureBuilt();
+            GUILayout.BeginVertical(HorusTheme.Card);
+            GUILayout.Label("SELF-TEST", HorusTheme.TitleText);
+            DiagnosticRow("Spawner.i", Spawner.i != null);
+            DiagnosticRow("Encyclopedia.i", Encyclopedia.i != null);
+            DiagnosticRow("FactionRegistry", FactionRegistry.factions != null && FactionRegistry.factions.Count > 0);
+            DiagnosticRow("DynamicMap.i", SceneSingleton<DynamicMap>.i != null);
+            DiagnosticRow("GameplayUI.i", SceneSingleton<GameplayUI>.i != null);
+            DiagnosticRow("Compatibility audit", GameApi.Ready);
+            DiagnosticRow("Theme built", HorusTheme.Built);
+            DiagnosticRow("GUIStyle allocations this frame = 0", HorusTheme.StylesAllocatedThisFrame == 0,
+                HorusTheme.StylesAllocatedThisFrame.ToString());
+
+            int aircraft = UnitCatalog.Count(UnitKind.Aircraft);
+            int ground = UnitCatalog.Count(UnitKind.Ground);
+            int sea = UnitCatalog.Count(UnitKind.Sea);
+            int building = UnitCatalog.Count(UnitKind.Building);
+            int scenery = UnitCatalog.Count(UnitKind.Scenery);
+            GUILayout.Label($"Catalog: AIR {aircraft} · GND {ground} · SEA {sea} · BLD {building} · SCN {scenery}", HorusTheme.LabelSmall);
+            GUILayout.Label($"Overlay {worldOverlay?.VisibleCount ?? 0}/64 · Selection {worldSelection?.Count ?? 0} · Pick {(inputRouter != null && inputRouter.Pick.Valid ? inputRouter.Pick.Distance.ToString("F1") + " m" : "none")}", HorusTheme.LabelSmall);
+            GUILayout.Label($"GC delta/60f: {HorusPerformanceTracker.GcDelta60Frames / 1024f:F1} KiB", HorusTheme.LabelSmall);
+            GUILayout.EndVertical();
+        }
+
+        private static void DiagnosticRow(string name, bool success, string detail = null)
+        {
+            Color previous = GUI.contentColor;
+            GUI.contentColor = success ? HorusTheme.Success : HorusTheme.Danger;
+            GUILayout.Label($"{(success ? "PASS" : "FAIL")}  {name}{(string.IsNullOrEmpty(detail) ? "" : " · " + detail)}", HorusTheme.LabelSmall);
+            GUI.contentColor = previous;
+        }
+
         private void RunSelfTest()
         {
-            HorusPlugin.Logger.LogInfo("=== HORUS SELF-TEST BEGIN ===");
-            HorusPlugin.Logger.LogInfo($"  Version: {HorusPlugin.PluginVersion}");
-            HorusPlugin.Logger.LogInfo($"  Scene: {UnityEngine.SceneManagement.SceneManager.GetActiveScene().name}");
+            HorusLog.Info("UI", "=== HORUS SELF-TEST BEGIN ===");
+            HorusLog.Info("UI", $"  Version: {HorusPlugin.PluginVersion}");
+            HorusLog.Info("UI", $"  Scene: {UnityEngine.SceneManagement.SceneManager.GetActiveScene().name}");
             
             // Instance count check
             var allManagers = FindObjectsOfType<HorusManager>();
-            HorusPlugin.Logger.LogInfo($"  HorusManager instances: {allManagers.Length} (expected: 1)");
+            HorusLog.Info("UI", $"  HorusManager instances: {allManagers.Length} (expected: 1)");
             if (allManagers.Length > 1)
-                HorusPlugin.Logger.LogWarning("  WARNING: Multiple HorusManager instances detected!");
-            HorusPlugin.Logger.LogInfo($"  Instance ID: {horusManagerInstanceId}");
+                HorusLog.Warning("UI", "  WARNING: Multiple HorusManager instances detected!");
+            HorusLog.Info("UI", $"  Instance ID: {horusManagerInstanceId}");
             
             // Game services
             bool spawnerReady = Spawner.i != null;
@@ -617,45 +720,38 @@ namespace HorusMod.Core
             var factions = FactionRegistry.factions;
             bool factionsReady = factions != null && factions.Count > 0;
             int factionCount = factions?.Count ?? 0;
-            HorusPlugin.Logger.LogInfo($"  Spawner.i: {(spawnerReady ? "READY" : "NOT READY")}");
-            HorusPlugin.Logger.LogInfo($"  Encyclopedia.i: {(encyclopediaReady ? "READY" : "NOT READY")}");
-            HorusPlugin.Logger.LogInfo($"  FactionRegistry: {(factionsReady ? $"READY ({factionCount} factions)" : "NOT READY")}");
-            HorusPlugin.Logger.LogInfo($"  GameManager.gameState: {GameManager.gameState}");
+            HorusLog.Info("UI", $"  Spawner.i: {(spawnerReady ? "READY" : "NOT READY")}");
+            HorusLog.Info("UI", $"  Encyclopedia.i: {(encyclopediaReady ? "READY" : "NOT READY")}");
+            HorusLog.Info("UI", $"  FactionRegistry: {(factionsReady ? $"READY ({factionCount} factions)" : "NOT READY")}");
+            HorusLog.Info("UI", $"  GameManager.gameState: {GameManager.gameState}");
             
             // Selected faction / unit validity
             bool isNeutral = factionsReady && selectedFactionIndex >= factionCount;
             bool factionValid = factionsReady && (selectedFactionIndex < factionCount || isNeutral);
-            HorusPlugin.Logger.LogInfo($"  Selected faction index: {selectedFactionIndex} (valid={factionValid}, neutral={isNeutral})");
+            HorusLog.Info("UI", $"  Selected faction index: {selectedFactionIndex} (valid={factionValid}, neutral={isNeutral})");
             
             UnitDefinition selectedDef = GetSelectedDefinition();
-            HorusPlugin.Logger.LogInfo($"  Selected unit: {(selectedDef != null ? selectedDef.unitName : "NONE")}");
+            HorusLog.Info("UI", $"  Selected unit: {(selectedDef != null ? selectedDef.unitName : "NONE")}");
             
             // Economy / Factory
             bool economyReady = economyManager != null;
             bool factoryReady = RtsFactoryManager.Instance != null;
-            HorusPlugin.Logger.LogInfo($"  RtsEconomyManager: {(economyReady ? $"READY (mode={economyManager.CurrentMode})" : "NOT READY")}");
-            HorusPlugin.Logger.LogInfo($"  RtsFactoryManager: {(factoryReady ? $"READY ({RtsFactoryManager.Instance.activeFactories.Count} factories)" : "NOT READY")}");
-            
-            // Command executor
-            HorusPlugin.Logger.LogInfo($"  Command executor: stub (v1.3.0 architecture, not wired)");
+            HorusLog.Info("UI", $"  RtsEconomyManager: {(economyReady ? $"READY (mode={economyManager.CurrentMode})" : "NOT READY")}");
+            HorusLog.Info("UI", $"  RtsFactoryManager: {(factoryReady ? $"READY ({RtsFactoryManager.Instance.activeFactories.Count} factories)" : "NOT READY")}");
             
             // Neutral support
-            HorusPlugin.Logger.LogInfo($"  Neutral spawn support: experimental (hq=null, may not work for all unit types)");
-            
-            // Dedicated bridge
-            bool bridgeEnabled = HorusPlugin.DedicatedServerBridgeEnabled?.Value ?? false;
-            HorusPlugin.Logger.LogInfo($"  Dedicated server bridge: {(bridgeEnabled ? "ENABLED (WARNING)" : "disabled")}");
+            HorusLog.Info("UI", $"  Neutral spawn support: enabled (HQ intentionally null)");
             
             // Lifecycle
-            HorusPlugin.Logger.LogInfo($"  Scene reload count: {sceneReloadCount}");
-            HorusPlugin.Logger.LogInfo($"  Scene loaded subscriptions: {sceneLoadedSubscriptions}");
-            HorusPlugin.Logger.LogInfo($"  Scene unloaded subscriptions: {sceneUnloadedSubscriptions}");
-            HorusPlugin.Logger.LogInfo($"  Last lifecycle event: {lastLifecycleEvent}");
-            HorusPlugin.Logger.LogInfo($"  Last spawn result: {lastSpawnResult}");
-            HorusPlugin.Logger.LogInfo($"  Last delete result: {lastDeleteResult}");
-            HorusPlugin.Logger.LogInfo($"  Spawned units tracked: {horusSpawnedUnits.Count}");
+            HorusLog.Info("UI", $"  Scene reload count: {sceneReloadCount}");
+            HorusLog.Info("UI", $"  Scene loaded subscriptions: {sceneLoadedSubscriptions}");
+            HorusLog.Info("UI", $"  Scene unloaded subscriptions: {sceneUnloadedSubscriptions}");
+            HorusLog.Info("UI", $"  Last lifecycle event: {lastLifecycleEvent}");
+            HorusLog.Info("UI", $"  Last spawn result: {lastSpawnResult}");
+            HorusLog.Info("UI", $"  Last delete result: {lastDeleteResult}");
+            HorusLog.Info("UI", $"  Spawned units tracked: {horusSpawnedUnits.Count}");
             
-            HorusPlugin.Logger.LogInfo("=== HORUS SELF-TEST END ===");
+            HorusLog.Info("UI", "=== HORUS SELF-TEST END ===");
             
             if (SceneSingleton<GameplayUI>.i != null) 
                 SceneSingleton<GameplayUI>.i.GameMessage("Horus: Self-test complete. Check BepInEx log.");
@@ -807,7 +903,7 @@ namespace HorusMod.Core
                 if (GUILayout.Button("↺ Reset Match Economy"))
                 {
                     economyManager.InitializeMatch();
-                    HorusPlugin.Logger.LogInfo("[RTS Economy] Match economy reset by host.");
+                    HorusLog.Info("UI", "[RTS Economy] Match economy reset by host.");
                     if (SceneSingleton<GameplayUI>.i != null)
                     {
                         SceneSingleton<GameplayUI>.i.GameMessage("Horus: RTS economy reset to defaults.");
@@ -821,299 +917,19 @@ namespace HorusMod.Core
         private int selectedPresetIndex = 0;
         private int selectedFactoryQueueIndex = 0;
         private float lastFactoryCreateActionTime = -999f;
+        private List<FactoryPreset> cachedFactoryPresetSource;
+        private string[] cachedFactoryPresetNames;
 
-        private void DrawRtsFactoriesUILegacy()
+        private string[] GetFactoryPresetNames(List<FactoryPreset> presets)
         {
-            if (RtsFactoryManager.Instance == null || RtsFactoryManager.Instance.Config == null)
-            {
-                GUILayout.Label("Factories manager not initialized.");
-                return;
-            }
-
-            var manager = RtsFactoryManager.Instance;
-            var presets = manager.Config.factoryPresets;
-            bool isHost = HorusPermissions.CanSpawn();
-
-            GUILayout.Space(5);
-            if (!Section("RTS Factories & Production", ref showFactoryTools)) return;
-
-            // 1. Factory System Info / Status
-            GUILayout.Label($"Factories System: {(manager.Config.settings.enableFactories ? "Enabled" : "Disabled")}");
-
-            // 2. Factory Selector
-            if (manager.activeFactories.Count == 0)
-            {
-                GUILayout.Label("No active factories.");
-            }
-            else
-            {
-                GUILayout.Label("Active Factories:");
-                for (int i = 0; i < manager.activeFactories.Count; i++)
-                {
-                    var factory = manager.activeFactories[i];
-                    string prefix = (selectedFactory == factory) ? "● " : "○ ";
-                    string status = factory.enabled ? "ON" : "OFF";
-                    if (GUILayout.Button($"{prefix}{factory.displayName} ({factory.factionName}) - {status}"))
-                    {
-                        selectedFactory = factory;
-                    }
-                }
-            }
-
-            GUILayout.Space(5);
-
-            // 3. Selected Factory Details
-            if (selectedFactory != null)
-            {
-                if (!manager.activeFactories.Contains(selectedFactory))
-                {
-                    selectedFactory = null;
-                }
-                else
-                {
-                    var f = selectedFactory;
-                    GUILayout.Box($"══ Factory: {f.displayName} ══");
-                    GUILayout.Label($"Faction: {f.factionName}");
-                    GUILayout.Label($"Type: {f.factoryType}");
-                    GUILayout.Label($"Status: {(f.enabled ? "ACTIVE" : "INACTIVE")}");
-                    GUILayout.Label($"Income: +{f.incomePerMinute:F0}/min");
-                    GUILayout.Label($"Production: {(f.produceUnits ? "ON" : "OFF")}");
-                    GUILayout.Label($"Consumes Budget: {(f.consumeBudgetForProduction ? "YES" : "NO")}");
-                    
-                    if (f.produceUnits && f.productionUnitKeys.Count > 0)
-                    {
-                        GUILayout.Label($"Interval: {f.productionIntervalSeconds}s");
-                        float nextIn = Mathf.Max(0f, f.productionIntervalSeconds - f.productionTimer);
-                        GUILayout.Label($"Next Unit In: {nextIn:F1}s");
-                        GUILayout.Label($"Active Produced Units: {f.activeProducedUnits.Count}/{f.maxActiveProducedUnits}");
-                    }
-                    else
-                    {
-                        GUILayout.Label("Production: None");
-                    }
-
-                    string rallyText = f.useRallyPoint ? $"Set ({f.rallyX:F0}, {f.rallyZ:F0})" : "Not Set";
-                    GUILayout.Label($"Rally Point: {rallyText}");
-
-                    // Queue
-                    GUILayout.Label($"Queue (Current index: {f.currentProductionIndex}):");
-                    if (f.productionUnitKeys.Count == 0)
-                    {
-                        GUILayout.Label("  [Empty]");
-                    }
-                    else
-                    {
-                        for (int qi = 0; qi < f.productionUnitKeys.Count; qi++)
-                        {
-                            GUILayout.BeginHorizontal();
-                            string arrow = (qi == f.currentProductionIndex) ? "➔ " : "   ";
-                            GUILayout.Label($"{arrow}{qi + 1}. {f.productionUnitKeys[qi]}");
-                            if (isHost)
-                            {
-                                if (GUILayout.Button("X", GUILayout.Width(20)))
-                                {
-                                    f.productionUnitKeys.RemoveAt(qi);
-                                    if (f.currentProductionIndex >= f.productionUnitKeys.Count)
-                                    {
-                                        f.currentProductionIndex = 0;
-                                    }
-                                    manager.SaveInstances();
-                                    break;
-                                }
-                            }
-                            GUILayout.EndHorizontal();
-                        }
-                    }
-
-                    if (isHost)
-                    {
-                        GUILayout.Space(3);
-                        GUILayout.BeginHorizontal();
-                        if (GUILayout.Button(f.enabled ? "Disable Factory" : "Enable Factory"))
-                        {
-                            f.enabled = !f.enabled;
-                            manager.SaveInstances();
-                        }
-                        if (GUILayout.Button(f.produceUnits ? "Production OFF" : "Production ON"))
-                        {
-                            f.produceUnits = !f.produceUnits;
-                            manager.SaveInstances();
-                        }
-                        GUILayout.EndHorizontal();
-
-                        GUILayout.BeginHorizontal();
-                        if (GUILayout.Button(f.consumeBudgetForProduction ? "Free Production" : "Paid Production"))
-                        {
-                            f.consumeBudgetForProduction = !f.consumeBudgetForProduction;
-                            manager.SaveInstances();
-                        }
-                        if (GUILayout.Button("Delete Factory"))
-                        {
-                            manager.DeleteFactory(f);
-                            selectedFactory = null;
-                            return;
-                        }
-                        GUILayout.EndHorizontal();
-
-                        GUILayout.Space(3);
-                        
-                        if (GUILayout.Button("Set Rally Point From Aim"))
-                        {
-                            if (TryGetCurrentPlacement(out Vector3 localRally, out _))
-                            {
-                                var globalRally = localRally.ToGlobalPosition();
-                                f.useRallyPoint = true;
-                                f.rallyX = globalRally.x;
-                                f.rallyY = globalRally.y;
-                                f.rallyZ = globalRally.z;
-                                manager.SaveInstances();
-                                if (SceneSingleton<GameplayUI>.i != null)
-                                {
-                                    SceneSingleton<GameplayUI>.i.GameMessage($"Horus: Rally point set for {f.displayName}");
-                                }
-                            }
-                        }
-
-                        if (f.useRallyPoint && GUILayout.Button("Clear Rally Point"))
-                        {
-                            f.useRallyPoint = false;
-                            manager.SaveInstances();
-                        }
-
-                        UnitDefinition currentSelected = GetSelectedDefinition();
-                        if (currentSelected != null)
-                        {
-                            if (GUILayout.Button($"Add Selected to Queue ({currentSelected.unitName})"))
-                            {
-                                f.productionUnitKeys.Add(currentSelected.unitName);
-                                manager.SaveInstances();
-                            }
-                        }
-
-                        if (f.productionUnitKeys.Count > 0 && GUILayout.Button("Clear Queue"))
-                        {
-                            f.productionUnitKeys.Clear();
-                            f.currentProductionIndex = 0;
-                            manager.SaveInstances();
-                        }
-                    }
-                    else
-                    {
-                        GUILayout.Label("Editing restricted to Host.");
-                    }
-                }
-            }
-
-            GUILayout.Space(5);
-
-            // 4. Creation (Host only)
-            if (isHost)
-            {
-                GUILayout.Box("══ Create Factory ══");
-                if (presets == null || presets.Count == 0)
-                {
-                    GUILayout.Label("No factory presets configured.");
-                }
-                else
-                {
-                    GUILayout.Label("Select Preset:");
-                    string[] presetNames = presets.Select(p => p.presetName).ToArray();
-                    if (selectedPresetIndex >= presetNames.Length) selectedPresetIndex = 0;
-                    selectedPresetIndex = GUILayout.SelectionGrid(selectedPresetIndex, presetNames, 2);
-
-                    string currentPresetName = presetNames[selectedPresetIndex];
-
-                    if (!string.IsNullOrEmpty(armedFactoryPresetName) && string.Equals(armedFactoryPresetName, currentPresetName, StringComparison.OrdinalIgnoreCase))
-                    {
-                        if (GUILayout.Button("Cancel Factory Placement", GUILayout.Height(30)))
-                        {
-                            armedFactoryPresetName = null;
-                            ghost.Clear();
-                        }
-                    }
-                    else
-                    {
-                        if (GUILayout.Button("Arm Factory Placement", GUILayout.Height(30)))
-                        {
-                            armedFactoryPresetName = currentPresetName;
-                            if (economyManager != null) economyManager.DisarmDeployment();
-                            ghost.Clear();
-                            if (SceneSingleton<GameplayUI>.i != null)
-                            {
-                                SceneSingleton<GameplayUI>.i.GameMessage($"Horus: Armed placement for {currentPresetName}. Click in world/map to place.");
-                            }
-                        }
-                    }
-
-                    Unit aimed = GetAimedUnit();
-                    if (aimed != null)
-                    {
-                        if (GUILayout.Button($"Create Factory From Selected: {aimed.unitName}"))
-                        {
-                            var created = manager.CreateFactoryFromUnit(aimed, currentPresetName);
-                            if (created != null)
-                            {
-                                selectedFactory = created;
-                                if (SceneSingleton<GameplayUI>.i != null)
-                                {
-                                    SceneSingleton<GameplayUI>.i.GameMessage($"Horus: Attached {created.displayName} to {aimed.unitName}");
-                                }
-                            }
-                        }
-                    }
-                }
-
-                GUILayout.Space(5);
-                GUILayout.Box("══ Bulk / Config Operations ══");
-                
-                GUILayout.BeginHorizontal();
-                if (GUILayout.Button("Save Factories"))
-                {
-                    manager.SaveInstances();
-                    if (SceneSingleton<GameplayUI>.i != null)
-                    {
-                        SceneSingleton<GameplayUI>.i.GameMessage("Horus: Factory instances saved.");
-                    }
-                }
-                if (GUILayout.Button("Load Factories"))
-                {
-                    manager.LoadInstances();
-                    manager.AutoDetectFactories();
-                    if (SceneSingleton<GameplayUI>.i != null)
-                    {
-                        SceneSingleton<GameplayUI>.i.GameMessage("Horus: Factory instances loaded.");
-                    }
-                }
-                GUILayout.EndHorizontal();
-
-                GUILayout.BeginHorizontal();
-                if (GUILayout.Button("Start All"))
-                {
-                    foreach (var f in manager.activeFactories) f.enabled = true;
-                    manager.SaveInstances();
-                }
-                if (GUILayout.Button("Stop All"))
-                {
-                    foreach (var f in manager.activeFactories) f.enabled = false;
-                    manager.SaveInstances();
-                }
-                GUILayout.EndHorizontal();
-
-                if (GUILayout.Button("Reload Factory Config"))
-                {
-                    manager.ReloadConfig();
-                    if (SceneSingleton<GameplayUI>.i != null)
-                    {
-                        SceneSingleton<GameplayUI>.i.GameMessage("Horus: Factory config reloaded.");
-                    }
-                }
-            }
-            else
-            {
-                GUILayout.Label("Creation & bulk operations restricted to Host.");
-            }
+            if (cachedFactoryPresetSource == presets && cachedFactoryPresetNames?.Length == presets.Count)
+                return cachedFactoryPresetNames;
+            cachedFactoryPresetSource = presets;
+            cachedFactoryPresetNames = new string[presets.Count];
+            for (int i = 0; i < presets.Count; i++)
+                cachedFactoryPresetNames[i] = presets[i]?.presetName ?? $"Preset {i + 1}";
+            return cachedFactoryPresetNames;
         }
-
 
         private void DrawRtsFactoriesUI()
         {
