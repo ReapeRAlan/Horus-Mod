@@ -3,7 +3,7 @@
 A Game Master/Free Camera utility mod for Nuclear Option (formerly known as Zeus Mod). Horus allows the host or local player to spawn aircraft, vehicles, ships, and buildings in real time.
 
 > [!NOTE]
-> The v1.3.0 capabilities documented below are currently **unreleased**. v1.2.4 remains the published rollback point. Lookup-only content, live ordnance, mod-provided definitions, and naval resupply remain experimental until they pass in-game validation.
+> The v1.3.0 capabilities documented below are published as of this release. Lookup-only content, live ordnance, mod-provided definitions, and naval resupply remain experimental until they pass further in-game validation.
 
 ## Features
 - Toggle Horus Mode (Free Camera + UI) with **F9**.

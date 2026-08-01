@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-07-31
+
 ### Added
 
 - Aircraft loadout sources for Default, native standard presets, the current Nuclear Option session, named Horus presets, the selected aircraft, and custom hardpoints.

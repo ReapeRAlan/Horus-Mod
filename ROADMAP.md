@@ -10,7 +10,7 @@ This roadmap separates released behavior from work that is still under developme
 - Cursor ownership, RMB context selection, Neutral factory validation, rally orders, and incomplete factory configuration migration were corrected.
 - Dedicated/headless control was deliberately kept out of the release.
 
-## v1.3.0 - Unreleased
+## Shipped in v1.3.0
 
 ### Reliable aircraft customization
 
@@ -43,7 +43,7 @@ This roadmap separates released behavior from work that is still under developme
 - Add `Logistics`, `Ammo`, `Naval Resupply`, `Fuel`, and `Storage` filters plus a `Can resupply ships: yes/no/unknown` diagnostic.
 - Offer **Spawn Naval Resupply** only for a definition whose prefab reports naval rearm capability. The selected ship can provide faction and an in-range placement target; Neutral cannot perform functional rearming.
 - Expose `MissileDefinition` entries as **Live Ordnance** for individual placement only. They remain excluded from groups, repeat placement, RTS presets, and factory queues.
-- Require confirmation for every live missile spawn and an additional confirmation for nuclear or strategic ordnance.
+- Spawn above the clicked point and fire straight down, so the click location is the impact point, with an explicit off-by-default **Guide toward selected unit** toggle for native target-lock instead. No launch confirmation is required.
 
 ### Runtime validation still required
 
@@ -73,6 +73,6 @@ References:
 
 ## Release policy
 
-- v1.2.4 remains the rollback checkpoint while v1.3.0 is under development.
-- Do not publish, push, tag, or package v1.3.0 without explicit approval.
+- v1.3.0 published 2026-07-31 with explicit approval; v1.2.4 remains available as the prior rollback checkpoint.
+- Do not publish, push, tag, or package a new version without explicit approval.
 - Keep runtime-dependent behavior marked experimental or unknown until it passes the acceptance checks above.
