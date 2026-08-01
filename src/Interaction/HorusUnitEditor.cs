@@ -1,4 +1,5 @@
 using HorusMod.Logging;
+using HorusMod.Loadouts;
 using HorusMod.Networking;
 
 namespace HorusMod.Interaction
@@ -7,15 +8,23 @@ namespace HorusMod.Interaction
     {
         public static bool TrySetLoadout(Aircraft aircraft, int presetIndex)
         {
-            if (!HorusPermissions.CanSpawn() || aircraft == null) return false;
-            AircraftDefinition definition = aircraft.definition as AircraftDefinition;
-            AircraftParameters parameters = definition != null ? definition.aircraftParameters : null;
-            if (parameters?.StandardLoadouts == null || presetIndex < 0 || presetIndex >= parameters.StandardLoadouts.Length) return false;
-            StandardLoadout preset = parameters.StandardLoadouts[presetIndex];
-            if (preset?.loadout == null) return false;
-            aircraft.Networkloadout = preset.loadout;
-            HorusLog.Verbose("UnitEditor", $"Changed loadout on '{aircraft.unitName}' to '{preset.Name}'.");
-            return true;
+            return TrySetLoadoutDetailed(aircraft, presetIndex).Success;
+        }
+
+        public static LoadoutApplyResult TrySetLoadoutDetailed(Aircraft aircraft, int presetIndex)
+        {
+            LoadoutApplyResult result = HorusLoadoutService.ApplyStandardPreset(aircraft, presetIndex);
+            if (!result.Success)
+                HorusLog.Verbose("UnitEditor", $"Loadout preset {presetIndex} was not applied: {result.Message}");
+            return result;
+        }
+
+        public static LoadoutApplyResult TrySetLoadout(Aircraft aircraft, LoadoutDraft draft)
+        {
+            LoadoutApplyResult result = HorusLoadoutService.ApplyToAircraft(aircraft, draft);
+            if (!result.Success)
+                HorusLog.Verbose("UnitEditor", $"Custom loadout was not applied: {result.Message}");
+            return result;
         }
 
         public static bool TrySetLivery(Aircraft aircraft, int index)

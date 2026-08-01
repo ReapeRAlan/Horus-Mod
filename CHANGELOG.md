@@ -1,5 +1,53 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- Aircraft loadout sources for Default, native standard presets, the current Nuclear Option session, named Horus presets, the selected aircraft, and custom hardpoints.
+- Per-hardpoint aircraft editing backed by native `HardpointSet` choices, including symmetric editing, exclusions, HQ/event restrictions, and preservation of hidden mounts from trusted native sources.
+- Aircraft-specific named preset storage at `BepInEx/config/HorusMod/aircraft_loadouts.json`, keyed by stable aircraft and weapon-mount identifiers.
+- Catalog discovery for missiles, `otherUnits`, and requested lookup-only definitions, plus a manual **Refresh Catalog** action for content registered late by other mods.
+- Catalog metadata for spawn kind, placement surface, network-registration state, unlabeled/experimental content, and supply capabilities.
+- `Logistics`, `Ammo`, `Naval Resupply`, `Fuel`, and `Storage` filters with a `Can resupply ships: yes/no/unknown` diagnostic.
+- Experimental individual spawning of native `MissileDefinition` entries as **Live Ordnance**. It now spawns above the clicked point and fires straight down, so the click location is the impact point; speed still controls the launch impulse. An explicit, off-by-default **Guide toward selected unit** toggle designates the single selected unit as a native guidance target (`Missile.SetTarget`) instead, for a moving-target shot that lands on the unit rather than the click point.
+- A guarded **Spawn Naval Resupply** action for definitions that expose naval `Rearmer` capability.
+
+### Changed
+
+- Next-spawn aircraft customization and selected-aircraft editing now keep independent drafts keyed by `AircraftDefinition.jsonKey`.
+- Aircraft spawn paths share an authoritative request/result service so loadout, fuel, livery, and skill can be supplied before network publication.
+- Post-spawn loadout changes use a newly built, validated `Networkloadout` rather than mutating or reusing a shared preset object.
+- Catalog refresh uses Encyclopedia content changes instead of a one-time instance check; unnamed `???` and compatible mod definitions are no longer discarded solely because of their display name.
+- Props and supply objects are classified by prefab type/components rather than name heuristics; a naval supply container is no longer treated as a ship merely because its name contains "naval".
+- Ground vehicles and ships explicitly report fixed armament instead of presenting aircraft-style loadout controls.
+- Temporary `GameManager.aircraftCustomization` data is labeled **Current Session** and is not presented as a persistent Nuclear Option loadout library.
+
+### Fixed
+
+- Deferred IMGUI selection changes prevent loadout/livery controls from displaying or applying the previously selected aircraft's values.
+- The first aircraft, group member, duplicate, undo/redo restore, and factory-produced aircraft no longer need a later patch-up spawn to receive the intended customization.
+- Mixed-model aircraft selections are rejected clearly instead of partially applying an incompatible loadout.
+- Mod aircraft and other definitions added after the initial catalog build can appear after automatic or manual refresh.
+- Fixed a build-breaking mismatch with the native `Spawner.SpawnSavedMissile` signature (the base game added `hq`, `targetName`, and `guidingUnitName` parameters); Live Ordnance now compiles and spawns again, and the new `targetName` parameter is what powers guided-shot targeting above.
+- Fixed native `Missile.LocalStart()` throwing a NullReferenceException on any munition with no `MissileSeeker` component (unguided bombs/rockets): it spawned and was destroyed again the same instant, with no explosion or error toast. Guarded with a Harmony prefix.
+- Live Ordnance previously launched along the manual placement-rotation heading (`spawnYaw`), which has nothing to do with the click location, so every shot flew the same direction regardless of where you clicked or what you targeted. It now fires straight down from directly above the click point instead.
+- The guidance-target lock was engaging automatically whenever a unit happened to be selected, silently overriding "click = impact" by steering to that unit's actual position instead — including stale selections left over from unrelated earlier actions. It is now off by default and must be explicitly enabled per shot.
+- A custom aircraft loadout that fails validation at spawn (hardpoint conflict, HQ/mission restriction, etc.) no longer silently falls back to the aircraft's default loadout with no explanation; the rejection reason is now shown both live while editing hardpoints and as a toast at spawn time.
+- Diagnosed with runtime logging (spawn X/Z was already proven pixel-exact to the click) plus a decompiled-source audit of every `MissileSeeker` subclass: `ARHSeeker.SlowChecks()` and `OpticalSeekerCruiseMissile.SlowChecks()`/`PreTerminalMode()` each treat "no target" as a self-destruct or divert-to-cruise-altitude trigger. Native gameplay never exercises that path (a pilot always fires these at something), but Horus's Live Ordnance spawns target-less by default, so active-radar-homing weapons (e.g. `ARH1`) always self-destructed within 2-10s wherever they happened to be, and cruise missiles (e.g. `CruiseMissile20kt`) always climbed toward cruise altitude and detonated mid-air ~2km short instead of diving onto the click point. Guarded with three Harmony prefixes that only change behavior when the seeker has no target — a real target (via **Guide toward selected unit**) still runs the native logic unmodified. Unguided/ballistic and optical/IR-seeker munitions (bombs, `SAM_IR1`, etc.) were already unaffected by this class of bug per the same audit.
+- The 2D strategic map's click-to-place path (`DynamicMap`) uses a completely different, never-instrumented screen-to-world conversion than the 3D free-camera path, has no ghost preview, and its only visual cue (`DrawMapSpawnOverlay`) is gated on a different flag than what actually triggers a map spawn — so a click can silently resolve to a map-space position with zero on-screen confirmation of where it will land. Not yet fixed; tracked as a known gap uncovered by this investigation.
+- Found the real cause of Live Ordnance landing far from the click point (previous fixes above addressed real but secondary bugs): a per-spawn trajectory logger showed every missile's actual position, 0.25s after spawning, snapping to almost exactly Unity world `(0,0,0)` — reconstructable exactly from the logged `datumOrigin`, proving it wasn't a placement or guidance bug at all. Several native `Spawner.Spawn*` methods (`SpawnSavedMissile`, `SpawnPilot`, `SpawnContainer`) move `transform.position` directly but never sync that into the `Rigidbody` (no `rb.position`/`MovePosition` call, unlike e.g. `SpawnVehicle`, which does); the next physics step then resets the transform back to wherever the Rigidbody's internal position was at `Instantiate` time (the prefab's authored local position, i.e. world origin), teleporting the unit away a fraction of a second after spawning regardless of where it was actually placed. This explained the missile drift and also matched two earlier, separately-reported symptoms with dismounted pilots and logistics containers landing away from the click point. Horus now force-syncs both `Rigidbody.position` and `transform.position` to the intended spawn point for every native spawn path, immediately after the call returns, in one central place (`HorusSpawnService.Spawn`) so any other definition type hitting the same native bug is covered automatically. Ships already had dedicated, more thorough correction logic from an earlier fix and were unaffected.
+
+### Safety
+
+- Lookup-only definitions require **Force incompatible content**, disabled by default, plus explicit per-definition/session confirmation; the UI warns that forced content may fail or desynchronize.
+- Live ordnance is limited to single placement, excluded from repeat placement, groups, RTS presets, and factory queues, and no longer requires a launch confirmation.
+- RTS Commander Mode's two-step "arm, then click again to deploy" gate (`RequireDeploymentConfirmation`) now defaults to off so placement is a single click; it remains available as an opt-in config toggle.
+- `WeaponMount` assets remain loadout choices and are never advertised as spawnable world objects.
+- Naval resupply status is derived from `Rearmer`; `Refueler`, `UnitStorage`, and `WarheadStorage` are reported separately so decorative/storage props are not claimed to rearm ships.
+- `NavalSupplyContainer1` and `NavalPallet1` are detected as component-compatible candidates through the current generic `Rearmer` API when their linked unit, range, capacity, and active state pass inspection. Actual ammunition recovery and single-use behavior remain experimental until a depleted-ammunition runtime test confirms rearming and clean logs.
+- Dedicated/headless Game Master control remains unsupported. v1.3.0 does not add unsafe TCP control or a hardcoded remote-admin path.
+
 ## [1.2.4] - 2026-07-30
 
 ### Added
@@ -21,6 +69,8 @@
 - The diagnostics instance count includes the persistent hidden Horus manager instead of reporting a false zero.
 
 ## [1.2.3] - 2026-07-30
+
+> Internal test build; it was not published or tagged as a public release.
 
 ### Added
 - Themed, resizable and persistent tabbed editor with cached IMGUI styles.

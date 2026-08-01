@@ -538,7 +538,13 @@ namespace HorusMod.Economy
             var state = GetFactionState(tx.FactionIndex);
             if (state == null) return;
 
-            state.Budget = Mathf.Max(0f, state.Budget - tx.GroupTotalCost);
+            float committedCost = 0f;
+            if (spawnedUnits != null)
+            {
+                for (int i = 0; i < spawnedUnits.Count; i++)
+                    if (spawnedUnits[i]?.definition != null) committedCost += GetUnitCost(spawnedUnits[i].definition);
+            }
+            state.Budget = Mathf.Max(0f, state.Budget - committedCost);
 
             if (spawnedUnits != null)
             {
@@ -549,7 +555,8 @@ namespace HorusMod.Economy
                 state.ActiveUnitCount = state.TrackedUnits.Count;
             }
 
-            HorusLog.Info("Economy", $"[RTS Economy] Group transaction committed: -{tx.GroupTotalCost:F0} for faction '{state.FactionName}'. Budget={state.Budget:F0}, Units={state.ActiveUnitCount}/{state.UnitCap}");
+            int successfulCount = spawnedUnits?.Count ?? 0;
+            HorusLog.Info("Economy", $"[RTS Economy] Group transaction committed: -{committedCost:F0} for {successfulCount} successful spawn(s) in faction '{state.FactionName}'. Budget={state.Budget:F0}, Units={state.ActiveUnitCount}/{state.UnitCap}");
         }
 
         // ─── Deployment Confirmation ─────────────────────────────────────────────

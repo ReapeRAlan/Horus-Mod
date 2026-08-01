@@ -13,6 +13,8 @@ using HorusMod.Data;
 using HorusMod.Interaction;
 using HorusMod.UI;
 using HorusMod.UI.ContextMenu;
+using HorusMod.Spawning;
+using HorusMod.Loadouts;
 using UnityEngine.SceneManagement;
 
 namespace HorusMod.Core
@@ -37,6 +39,7 @@ namespace HorusMod.Core
         private Rect windowRect = HorusPrefs.DefaultWindowRect;
         
         private int selectedFactionIndex = 0;
+        private int pendingFactionIndex = -1;
         private int selectedCategoryIndex = 0;
         private string armedFactoryPresetName = null;
         private int cachedFactionCount = -1;
@@ -70,7 +73,24 @@ namespace HorusMod.Core
         private CursorLockMode savedCursorLockState;
         private bool savedCursorVisible;
         private UnitDefinition armedDefinitionOverride;
+        // Catalog buttons run during IMGUI MouseUp. Applying the new definition there
+        // changes the GUILayout tree after Layout was calculated and makes the UI appear
+        // one selection behind. Queue it and commit from Update before the next Layout.
+        private UnitDefinition pendingArmDefinition;
         private Unit lastSpawnedUnit;
+        private bool lastPlacementConsumed;
+        private bool lastPlacementWasLiveOrdnance;
+        private readonly Dictionary<string, string> acknowledgedLookupDefinitions =
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        private int pendingForceIncompatible = -1;
+        private string pendingLookupAcknowledgement;
+        // Missile launch speed for individual ordnance spawns (fires straight down onto the click point).
+        private float missileLaunchSpeed = 250f;
+        // Off by default: native guidance steers toward the selected unit's actual position,
+        // not the click point, so leaving this on by default breaks "click = impact" the
+        // moment anything happens to be selected. Opt-in only, from the Live Ordnance panel.
+        private bool missileGuideToSelectedTarget = false;
+        private readonly Queue<Action> pendingUiActions = new Queue<Action>();
         private bool scrollAxisAvailable = true;
 
         // Grid snapping
@@ -96,6 +116,35 @@ namespace HorusMod.Core
         // Aircraft Customization (Patch 0.33.4)
         public enum AircraftLiveryMode { Default = 0, FactionDefault = 1, Random = 2, Specific = 3 }
         public enum AircraftLoadoutMode { Default = 0, StandardPreset = 1, RandomStandardPreset = 2 }
+
+        private enum PresetUiAction { None, SaveNew, Update, Rename, Duplicate, Delete, Reload }
+
+        private sealed class AircraftEditorUiState
+        {
+            public AircraftLiveryMode LiveryMode = AircraftLiveryMode.Default;
+            public LoadoutSourceKind LoadoutSource = LoadoutSourceKind.Default;
+            public int LiveryIndex;
+            public int StandardIndex;
+            public int SavedPresetIndex;
+            public string SavedPresetId = "";
+            public string PresetName = "New preset";
+            public float Skill = 0.5f;
+            public bool ApplyToGroups;
+            public bool MirrorSymmetry;
+            public bool ShowHardpoints;
+            public int PendingLoadoutSourceIndex = -1;
+            public int PendingLiveryMode = -1;
+            public int PendingShowHardpoints = -1;
+            public LoadoutDraft Draft;
+            public string Status = "";
+            public PresetUiAction PendingPresetAction;
+            public LoadoutDraft PendingPresetDraft;
+            public string PendingPresetId;
+            public string PendingPresetName;
+        }
+
+        private readonly Dictionary<string, AircraftEditorUiState> placementAircraftStates = new Dictionary<string, AircraftEditorUiState>(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, AircraftEditorUiState> manageAircraftStates = new Dictionary<string, AircraftEditorUiState>(StringComparer.OrdinalIgnoreCase);
 
         public AircraftLiveryMode aircraftLiveryMode = AircraftLiveryMode.Default;
         public AircraftLoadoutMode aircraftLoadoutMode = AircraftLoadoutMode.Default;
@@ -127,8 +176,10 @@ namespace HorusMod.Core
 
         // Groups & Formations
         private bool enableGroupSpawn = false;
+        private int pendingGroupEnabled = -1;
         private bool spawnStationary = false;
         private int selectedGroupPresetIndex = 0;
+        private int pendingGroupPresetIndex = -1;
         private int cachedGroupFactionIndex = int.MinValue;
         private string[] cachedGroupPresetNames;
         
@@ -143,6 +194,12 @@ namespace HorusMod.Core
         private readonly System.Collections.Generic.List<UnitDefinition> customGroupUnits = new System.Collections.Generic.List<UnitDefinition>();
         private readonly System.Collections.Generic.List<string> savedCustomGroupNames = new System.Collections.Generic.List<string>();
         private int selectedSavedGroupIndex = 0;
+        private UnitDefinition pendingCustomGroupAdd;
+        private int pendingCustomGroupRemoveIndex = -1;
+        private bool pendingCustomGroupClear;
+        private string pendingCustomGroupSave;
+        private string pendingCustomGroupLoad;
+        private string pendingCustomGroupDelete;
 
         public static int sceneReloadCount = 0;
         public static string horusManagerInstanceId = System.Guid.NewGuid().ToString("N").Substring(0, 8);
@@ -163,10 +220,15 @@ namespace HorusMod.Core
         public float SpawnAltitude => spawnAltitude;
         public float SpawnYaw => spawnYaw;
         public UnitDefinition ArmedDefinition => GetSelectedDefinition();
+        public bool LastPlacementConsumed => lastPlacementConsumed;
+        public bool LastPlacementWasLiveOrdnance => lastPlacementWasLiveOrdnance;
 
         public PlacementOptions CapturePlacementOptions(UnitDefinition definition = null)
         {
             definition ??= GetSelectedDefinition();
+            AircraftEditorUiState aircraftState = definition is AircraftDefinition aircraftDefinition
+                ? GetAircraftEditorState(aircraftDefinition, manage: false)
+                : null;
             return new PlacementOptions(
                 definition,
                 selectedFactionIndex,
@@ -179,12 +241,46 @@ namespace HorusMod.Core
                 spawnStationary,
                 CurrentFormation,
                 groupSpacing,
-                (int)aircraftLiveryMode,
-                (int)aircraftLoadoutMode,
-                selectedLiveryIndex,
-                selectedStandardLoadoutIndex,
-                selectedAircraftSkill,
-                applyCustomizationToGroups);
+                (int)(aircraftState?.LiveryMode ?? aircraftLiveryMode),
+                (int)LegacyLoadoutMode(aircraftState?.LoadoutSource ?? LoadoutSourceKind.Default),
+                aircraftState?.LiveryIndex ?? selectedLiveryIndex,
+                aircraftState?.StandardIndex ?? selectedStandardLoadoutIndex,
+                aircraftState?.Skill ?? selectedAircraftSkill,
+                aircraftState?.ApplyToGroups ?? applyCustomizationToGroups,
+                aircraftState?.LoadoutSource ?? LoadoutSourceKind.Default,
+                aircraftState?.Draft);
+        }
+
+        private static AircraftLoadoutMode LegacyLoadoutMode(LoadoutSourceKind source)
+        {
+            if (source == LoadoutSourceKind.StandardPreset) return AircraftLoadoutMode.StandardPreset;
+            if (source == LoadoutSourceKind.RandomStandardPreset) return AircraftLoadoutMode.RandomStandardPreset;
+            return AircraftLoadoutMode.Default;
+        }
+
+        private AircraftEditorUiState GetAircraftEditorState(AircraftDefinition definition, bool manage)
+        {
+            if (definition == null) return null;
+            CatalogEntry catalogEntry = FindCatalogEntry(definition);
+            string key = !string.IsNullOrWhiteSpace(catalogEntry?.Key)
+                ? catalogEntry.Key
+                : !string.IsNullOrWhiteSpace(definition.jsonKey)
+                    ? definition.jsonKey
+                    : "instance-" + definition.GetInstanceID();
+            Dictionary<string, AircraftEditorUiState> states = manage ? manageAircraftStates : placementAircraftStates;
+            if (!states.TryGetValue(key, out AircraftEditorUiState state))
+            {
+                state = new AircraftEditorUiState
+                {
+                    Draft = HorusLoadoutService.CreateDefaultDraft(definition)
+                };
+                states.Add(key, state);
+            }
+            if (state.Draft == null ||
+                (!string.IsNullOrWhiteSpace(state.Draft.AircraftJsonKey) &&
+                 !string.Equals(state.Draft.AircraftJsonKey, definition.jsonKey, StringComparison.OrdinalIgnoreCase)))
+                state.Draft = HorusLoadoutService.CreateDefaultDraft(definition);
+            return state;
         }
 
         public void ToggleUiVisibility()
@@ -274,7 +370,14 @@ namespace HorusMod.Core
             HorusContextMenu.Close();
             UnitBrowser.Reset();
             armedDefinitionOverride = null;
+            pendingArmDefinition = null;
             armedFactoryPresetName = null;
+            acknowledgedLookupDefinitions.Clear();
+            HorusSpawnService.ResetAuthorizations();
+            pendingUiActions.Clear();
+            placementAircraftStates.Clear();
+            manageAircraftStates.Clear();
+            UnitCatalog.Invalidate();
             cachedFactionCount = -1;
             cachedGroupFactionIndex = int.MinValue;
             
@@ -319,6 +422,9 @@ namespace HorusMod.Core
         private void Update()
         {
             HorusPerformanceTracker.BeginFrameTrace();
+
+            ApplyPendingArmDefinition();
+            ApplyPendingUiActions();
 
             // Periodic 3s cleanup & metric collection (avoids per-frame heavy scans)
             if (Time.timeSinceLevelLoad - lastPerformanceCleanupTime > 3.0f)
@@ -369,7 +475,9 @@ namespace HorusMod.Core
                     if (HorusPlugin.UIScale != null) HorusPlugin.UIScale.Value = 1.0f;
                     inputRouter.Reset();
                     armedDefinitionOverride = null;
+                    pendingArmDefinition = null;
                     armedFactoryPresetName = null;
+                    pendingUiActions.Clear();
                     HorusToasts.Clear();
                     ExitMapSpawnMode();
                     HorusWindowRoot.ResetActiveTab();
@@ -399,6 +507,34 @@ namespace HorusMod.Core
             // active, so Horus must repair cursor drift itself.
             SetHorusCursorLock(inputRouter != null && inputRouter.Looking);
             HorusPerformanceTracker.EndFrameTrace();
+        }
+
+        /// <summary>
+        /// IMGUI callbacks can run after Unity has already calculated the current
+        /// GUILayout tree. Mutations that alter selection, queues, factories, or
+        /// mode state are therefore committed from Update before the next Layout.
+        /// </summary>
+        private void QueueUiAction(Action action)
+        {
+            if (action != null) pendingUiActions.Enqueue(action);
+        }
+
+        private void ApplyPendingUiActions()
+        {
+            int pendingCount = pendingUiActions.Count;
+            for (int i = 0; i < pendingCount; i++)
+            {
+                Action action = pendingUiActions.Dequeue();
+                try
+                {
+                    action?.Invoke();
+                }
+                catch (Exception ex)
+                {
+                    HorusLog.Error("UI", "Deferred UI action failed: " + ex.Message);
+                    HorusToasts.Show("Horus action failed; check the log.");
+                }
+            }
         }
 
         /// <summary>
@@ -601,6 +737,8 @@ namespace HorusMod.Core
                 ghost.Clear();
                 armedFactoryPresetName = null;
                 armedDefinitionOverride = null;
+                pendingArmDefinition = null;
+                pendingUiActions.Clear();
                 inputRouter.Reset();
                 SetHorusCursorLock(false);
                 
@@ -822,7 +960,6 @@ namespace HorusMod.Core
             if (selectedFactory == null) return;
             if (!manager.activeFactories.Contains(selectedFactory))
             {
-                selectedFactory = null;
                 return;
             }
 
@@ -894,9 +1031,7 @@ namespace HorusMod.Core
             }
             if (GUILayout.Button("Delete Selected Factory"))
             {
-                manager.DeleteFactory(f);
-                selectedFactory = null;
-                return;
+                pendingFactoryDelete = f;
             }
             GUILayout.EndHorizontal();
 
@@ -972,12 +1107,18 @@ namespace HorusMod.Core
             {
                 if (CanRunFactoryCreateAction())
                 {
-                    if (TryGetCurrentPlacement(out Vector3 localFactory, out float yaw))
+                    WorldPick factoryPick = inputRouter != null && inputRouter.Pick.Valid
+                        ? inputRouter.Pick
+                        : WorldPick.FromScreen(Input.mousePosition);
+                    if (factoryPick.Valid)
                     {
+                        Vector3 localFactory = GetFactoryPlacementPosition(factoryPick.Point, currentPresetName);
+                        float yaw = spawnYaw;
                         var created = manager.CreateFactoryAtPlacement(localFactory, NormalizeAngle(yaw), currentPresetName, selectedFactionIndex);
                         if (created != null)
                         {
-                            selectedFactory = created;
+                            pendingFactorySelection = created;
+                            pendingFactorySelectionSet = true;
                             if (SceneSingleton<GameplayUI>.i != null) SceneSingleton<GameplayUI>.i.GameMessage($"Horus: Created {created.displayName}");
                         }
                     }
@@ -1003,7 +1144,8 @@ namespace HorusMod.Core
                         var created = manager.CreateFactoryFromUnit(aimed, currentPresetName);
                         if (created != null)
                         {
-                            selectedFactory = created;
+                            pendingFactorySelection = created;
+                            pendingFactorySelectionSet = true;
                             if (SceneSingleton<GameplayUI>.i != null) SceneSingleton<GameplayUI>.i.GameMessage($"Horus: Attached {created.displayName} to {aimed.unitName}");
                         }
                     }
@@ -1015,8 +1157,7 @@ namespace HorusMod.Core
             {
                 if (GUILayout.Button("Cancel Factory Placement", GUILayout.Height(30)))
                 {
-                    armedFactoryPresetName = null;
-                    ghost.Clear();
+                    CancelPlacement();
                 }
             }
             else
@@ -1025,9 +1166,7 @@ namespace HorusMod.Core
                 GUI.enabled = previousEnabled && selectedFactionUsable;
                 if (GUILayout.Button("Arm Factory Placement", GUILayout.Height(30)))
                 {
-                    armedFactoryPresetName = currentPresetName;
-                    if (economyManager != null) economyManager.DisarmDeployment();
-                    ghost.Clear();
+                    ArmFactoryPlacement(currentPresetName);
                     if (SceneSingleton<GameplayUI>.i != null)
                     {
                         SceneSingleton<GameplayUI>.i.GameMessage($"Horus: Armed placement for {currentPresetName}. Click in world/map to place.");
@@ -1124,6 +1263,7 @@ namespace HorusMod.Core
 
         public void DeselectSelectedUnit()
         {
+            pendingArmDefinition = null;
             armedDefinitionOverride = null;
             ghost?.Clear();
             lastSpawnResult = "Unit deselected.";
@@ -1133,6 +1273,14 @@ namespace HorusMod.Core
         public void ArmDefinition(UnitDefinition definition)
         {
             if (definition == null) return;
+            pendingArmDefinition = definition;
+        }
+
+        private void ApplyPendingArmDefinition()
+        {
+            UnitDefinition definition = pendingArmDefinition;
+            if (definition == null) return;
+            pendingArmDefinition = null;
             armedDefinitionOverride = definition;
             showAircraftCustomizationTools = definition is AircraftDefinition;
             selectedCategoryIndex = GetUnitCategoryIndex(definition);
@@ -1151,6 +1299,18 @@ namespace HorusMod.Core
                 return;
             }
 
+            if (Event.current.type == EventType.Layout && pendingFactionIndex >= 0)
+            {
+                int previous = selectedFactionIndex;
+                selectedFactionIndex = Mathf.Clamp(pendingFactionIndex, 0, factions.Count);
+                pendingFactionIndex = -1;
+                if (previous != selectedFactionIndex)
+                {
+                    selectedGroupPresetIndex = 0;
+                    cachedGroupFactionIndex = int.MinValue;
+                    ghost.Clear();
+                }
+            }
             if (selectedFactionIndex < 0 || selectedFactionIndex > factions.Count) selectedFactionIndex = 0;
             if (cachedFactionLabels == null || cachedFactionCount != factions.Count)
             {
@@ -1160,19 +1320,25 @@ namespace HorusMod.Core
                     cachedFactionLabels[i] = factions[i] != null ? factions[i].factionName : "Unknown";
                 cachedFactionLabels[factions.Count] = "Neutral";
             }
-            int previous = selectedFactionIndex;
             GUILayout.Label("Faction", HorusTheme.LabelMuted);
-            selectedFactionIndex = GUILayout.SelectionGrid(selectedFactionIndex, cachedFactionLabels, 2);
-            if (previous != selectedFactionIndex)
-            {
-                selectedGroupPresetIndex = 0;
-                ghost.Clear();
-            }
+            int nextFaction = GUILayout.SelectionGrid(selectedFactionIndex, cachedFactionLabels, 2);
+            if (nextFaction != selectedFactionIndex) pendingFactionIndex = nextFaction;
+        }
+
+        private void ArmFactoryPlacement(string presetName)
+        {
+            pendingArmDefinition = null;
+            armedDefinitionOverride = null;
+            armedFactoryPresetName = presetName;
+            economyManager?.DisarmDeployment();
+            ghost.Clear();
+            inputRouter?.SetTool(HorusTool.Place);
         }
 
         public void CancelPlacement()
         {
             if (mapSpawnMode) ExitMapSpawnMode();
+            pendingArmDefinition = null;
             armedDefinitionOverride = null;
             armedFactoryPresetName = null;
             ghost.Clear();
@@ -1182,6 +1348,7 @@ namespace HorusMod.Core
         public void CancelMapPlacement()
         {
             ExitMapSpawnMode();
+            pendingArmDefinition = null;
             armedDefinitionOverride = null;
             armedFactoryPresetName = null;
             ghost.Clear();
@@ -1226,14 +1393,17 @@ namespace HorusMod.Core
         public Unit PlaceAtWorld(Vector3 rawPosition)
         {
             lastSpawnedUnit = null;
+            lastPlacementConsumed = false;
+            lastPlacementWasLiveOrdnance = false;
             if (!HorusPermissions.CanSpawn()) return null;
             if (!string.IsNullOrEmpty(armedFactoryPresetName))
             {
-                Vector3 position = GetFinalPlacementPosition(rawPosition);
+                Vector3 position = GetFactoryPlacementPosition(rawPosition, armedFactoryPresetName);
                 float yaw = NormalizeAngle(GetPlacementRotation().eulerAngles.y);
                 RtsFactory created = RtsFactoryManager.Instance?.CreateFactoryAtPlacement(position, yaw, armedFactoryPresetName, selectedFactionIndex);
                 if (created != null)
                 {
+                    lastPlacementConsumed = true;
                     selectedFactory = created;
                     armedFactoryPresetName = null;
                     ghost.Clear();
@@ -1247,8 +1417,27 @@ namespace HorusMod.Core
                 return null;
             }
 
-            SpawnSelectedUnit(GetFinalPlacementPosition(rawPosition));
+            SpawnSelectedUnit(GetFinalPlacementPosition(rawPosition, logDiagnostics: true));
+            lastPlacementConsumed = lastSpawnedUnit != null;
+            lastPlacementWasLiveOrdnance = lastSpawnedUnit != null &&
+                FindCatalogEntry(lastSpawnedUnit.definition)?.IsLiveOrdnance == true;
             return lastSpawnedUnit;
+        }
+
+        private Vector3 GetFactoryPlacementPosition(Vector3 rawPosition, string presetName)
+        {
+            UnitDefinition visualDefinition = null;
+            RtsFactoryManager factoryManager = RtsFactoryManager.Instance;
+            FactoryPreset preset = factoryManager?.Config?.factoryPresets?
+                .FirstOrDefault(p => string.Equals(p?.presetName, presetName, StringComparison.OrdinalIgnoreCase));
+            if (!string.IsNullOrWhiteSpace(preset?.visualBuilding))
+                visualDefinition = factoryManager.ResolveVisualBuildingDefinition(preset.visualBuilding, out _, false);
+            if (visualDefinition != null)
+                return GetFinalPlacementPosition(rawPosition, visualDefinition, GetUnitCategoryIndex(visualDefinition));
+
+            Vector3 position = ApplyGridSnap(rawPosition);
+            if (TrySampleGroundHeight(position, out float groundY)) position.y = groundY;
+            return position;
         }
 
         public Unit PlaceAtMap(GlobalPosition mapPosition)
@@ -1275,6 +1464,17 @@ namespace HorusMod.Core
             foreach (Unit source in worldSelection.Units)
             {
                 if (source == null || source.definition == null) continue;
+                CatalogEntry sourceEntry = FindCatalogEntry(source.definition);
+                if (sourceEntry?.IsLiveOrdnance == true)
+                {
+                    HorusToasts.Show("Live ordnance cannot be duplicated");
+                    continue;
+                }
+                if (!CanAttemptCatalogSpawn(source.definition, out string duplicateDenial))
+                {
+                    HorusToasts.Show("Duplicate blocked: " + duplicateDenial);
+                    continue;
+                }
                 Vector3 offset = source.transform.right * Mathf.Max(25f, source.definition.width * 1.5f);
                 GlobalPosition duplicatePosition = (source.transform.position + offset).ToGlobalPosition();
                 Unit duplicate;
@@ -1284,25 +1484,43 @@ namespace HorusMod.Core
                         ? FactionRegistry.factions.IndexOf(source.NetworkHQ.faction)
                         : -1;
                     if (factionIndex < 0) factionIndex = FactionRegistry.factions?.Count ?? 0;
-                    duplicate = SpawnShipSafe(source.definition, duplicatePosition, source.transform.eulerAngles.y, factionIndex);
+                    duplicate = SpawnShipSafe(source.definition, duplicatePosition, source.transform.eulerAngles.y,
+                        factionIndex, false);
                 }
                 else
                 {
-                    duplicate = Spawner.i.SpawnFromUnitDefinitionInEditor(
-                        source.definition,
-                        duplicatePosition,
-                        source.transform.rotation,
-                        source.NetworkHQ,
-                        (source.definition.jsonKey ?? "unit") + "_copy_" + Guid.NewGuid().ToString("N").Substring(0, 6));
+                    var request = new HorusSpawnRequest
+                    {
+                        Definition = source.definition,
+                        Position = duplicatePosition,
+                        Rotation = source.transform.rotation,
+                        HQ = source.NetworkHQ,
+                        UniqueName = (source.definition.jsonKey ?? "unit") + "_copy_" + Guid.NewGuid().ToString("N").Substring(0, 6),
+                        Skill = source is GroundVehicle sourceGround ? sourceGround.skill : 1f
+                    };
+                    if (source is Aircraft sourceAircraftForSpawn)
+                    {
+                        request.Aircraft = new AircraftSpawnOptions
+                        {
+                            Loadout = sourceAircraftForSpawn.Networkloadout,
+                            FuelRatio = sourceAircraftForSpawn.NetworkfuelLevel,
+                            Livery = sourceAircraftForSpawn.NetworkLiveryKey,
+                            Skill = sourceAircraftForSpawn.skill,
+                            Bravery = sourceAircraftForSpawn.bravery
+                        };
+                    }
+                    if (!TryAuthorizeSpawnRequest(request, false, out string authorizationError))
+                    {
+                        HorusToasts.Show("Duplicate blocked: " + authorizationError);
+                        continue;
+                    }
+                    duplicate = HorusSpawnService.Spawn(request).Unit;
                 }
                 if (duplicate == null) continue;
                 horusSpawnedUnits.Add(duplicate);
                 if (source is Aircraft sourceAircraft && duplicate is Aircraft duplicateAircraft)
                 {
-                    duplicateAircraft.Networkloadout = sourceAircraft.Networkloadout;
-                    duplicateAircraft.SetLiveryKey(sourceAircraft.NetworkLiveryKey, true);
-                    duplicateAircraft.skill = sourceAircraft.skill;
-                    duplicateAircraft.bravery = sourceAircraft.bravery;
+                    // Aircraft state was supplied before the native network spawn.
                 }
                 else if (source is GroundVehicle sourceVehicle && duplicate is GroundVehicle duplicateVehicle)
                 {
@@ -1393,8 +1611,11 @@ namespace HorusMod.Core
 
                     if (selectedPreset != null && selectedPreset.loadout != null)
                     {
-                        aircraft.Networkloadout = selectedPreset.loadout;
-                        HorusLog.Verbose("UnitEditor", $"Applied standard loadout '{selectedPreset.Name}' to {aircraft.unitName}.");
+                        LoadoutApplyResult applied = HorusLoadoutService.ApplyToAircraft(aircraft, selectedPreset.loadout);
+                        if (applied.Success)
+                            HorusLog.Verbose("UnitEditor", $"Applied standard loadout '{selectedPreset.Name}' to {aircraft.unitName}.");
+                        else
+                            HorusLog.Warning("UnitEditor", $"Could not apply standard loadout '{selectedPreset.Name}': {applied.Message}");
                     }
                 }
 
@@ -1434,7 +1655,7 @@ namespace HorusMod.Core
 
         private Vector3 ApplyGroundSnap(Vector3 position, UnitDefinition unit, int category)
         {
-            bool groundCategory = category == 1 || category == 3 || category == 4;
+            bool groundCategory = GetPlacementSurface(unit) == PlacementSurface.Ground;
             if (snapToGround && groundCategory && TrySampleGroundHeight(position, out float groundY))
             {
                 position.y = groundY + spawnAltitude;
@@ -1445,13 +1666,25 @@ namespace HorusMod.Core
         private Quaternion GetPlacementRotation()
         {
             Quaternion yawRot = Quaternion.Euler(0f, ApplyRotationSnap(spawnYaw), 0f);
-            bool groundCategory = selectedCategoryIndex == 1 || selectedCategoryIndex == 3 || selectedCategoryIndex == 4;
+            bool groundCategory = GetPlacementSurface(GetSelectedDefinition()) == PlacementSurface.Ground;
             // Experimental: tilt ground units to the surface. Skipped for aircraft/ships and map spawn.
             if (alignToSurface && groundCategory && !mapSpawnMode)
             {
                 return Quaternion.FromToRotation(Vector3.up, lastSurfaceNormal) * yawRot;
             }
             return yawRot;
+        }
+
+        /// <summary>
+        /// Ghost/placement rotation, special-cased for Live Ordnance so the preview matches
+        /// the actual launch (straight down onto the click point) instead of showing the
+        /// unrelated placement-rotation heading used by every other unit type.
+        /// </summary>
+        private Quaternion GetGhostPlacementRotation()
+        {
+            return GetSelectedDefinition() is MissileDefinition
+                ? Quaternion.LookRotation(Vector3.down, Vector3.forward)
+                : GetPlacementRotation();
         }
 
         private float GetOceanLevel()
@@ -1468,15 +1701,17 @@ namespace HorusMod.Core
         /// Unified placement pipeline: grid-snap XZ, add altitude, then ground-snap for ground
         /// categories. Used by both the ghost preview and the real spawn so they always match.
         /// </summary>
-        internal Vector3 GetFinalPlacementPosition(Vector3 rawPosition, UnitDefinition def = null, int cat = -1, bool applySpacing = true)
+        internal Vector3 GetFinalPlacementPosition(Vector3 rawPosition, UnitDefinition def = null, int cat = -1, bool applySpacing = true, bool logDiagnostics = false)
         {
             if (def == null) def = GetSelectedDefinition();
             if (cat < 0) cat = selectedCategoryIndex;
             PlacementOptions options = CapturePlacementOptions(def);
+            CatalogEntry catalogEntry = FindCatalogEntry(def);
+            PlacementSurface surface = catalogEntry != null ? catalogEntry.PlacementSurface : GetPlacementSurface(def);
 
             Vector3 pos = ApplyGridSnap(rawPosition);
 
-            bool isShip = IsShipDefinition(def) || (cat == 2);
+            bool isShip = (catalogEntry != null && catalogEntry.SpawnKind == SpawnKind.Ship) || IsShipDefinition(def);
             // Dedicated safe ship placement path
             if (isShip)
             {
@@ -1533,8 +1768,18 @@ namespace HorusMod.Core
                 }
                 return pos;
             }
+
+            if (surface == PlacementSurface.Sea)
+            {
+                pos.y = GetOceanLevel() + options.Altitude + (def != null ? def.spawnOffset.y : 0f);
+                return pos;
+            }
             
             bool useOceanSnap = oceanSnapActive || (autoOceanSnapForShips && cat == 2);
+            float preSnapY = pos.y;
+            bool groundCategoryForLog = false;
+            bool groundSampleHitForLog = false;
+            float groundSampleYForLog = 0f;
             if (useOceanSnap)
             {
                 pos.y = GetOceanLevel() + options.Altitude;
@@ -1542,6 +1787,11 @@ namespace HorusMod.Core
             else
             {
                 pos.y += options.Altitude;
+                if (logDiagnostics)
+                {
+                    groundCategoryForLog = GetPlacementSurface(def) == PlacementSurface.Ground;
+                    groundSampleHitForLog = TrySampleGroundHeight(pos, out groundSampleYForLog);
+                }
                 pos = ApplyGroundSnap(pos, def, cat);
             }
 
@@ -1555,6 +1805,16 @@ namespace HorusMod.Core
             if (cat == 1 && Mathf.Approximately(options.Altitude, 0f))
             {
                 pos.y += 2f;
+            }
+
+            if (logDiagnostics)
+            {
+                HorusLog.Info("Placement",
+                    $"'{def?.jsonKey}': raw=({rawPosition.x:F1},{rawPosition.y:F1},{rawPosition.z:F1}) " +
+                    $"surface={surface} groundCategory={groundCategoryForLog} snapToGround={snapToGround} " +
+                    $"preSnapY={preSnapY:F1} groundSample(hit={groundSampleHitForLog},y={groundSampleYForLog:F1}) " +
+                    $"altitude={options.Altitude:F1} spawnOffsetY={(def != null ? def.spawnOffset.y : 0f):F1} " +
+                    $"final=({pos.x:F1},{pos.y:F1},{pos.z:F1}).");
             }
 
             return pos;
@@ -1596,6 +1856,87 @@ namespace HorusMod.Core
             return list;
         }
 
+        private AircraftSpawnOptions BuildAircraftSpawnOptions(AircraftDefinition definition, FactionHQ hq, PlacementOptions options, bool applyRequestedCustomization)
+        {
+            AircraftParameters parameters = definition != null ? definition.aircraftParameters : null;
+            var result = new AircraftSpawnOptions
+            {
+                FuelRatio = parameters != null ? parameters.DefaultFuelLevel : 1f,
+                Skill = options != null ? options.Skill : 0.5f
+            };
+            result.Bravery = Mathf.Clamp01(result.Skill * 0.75f + 0.2f);
+
+            if (parameters == null) return result;
+
+            LoadoutApplyResult resolved;
+            LoadoutSourceKind source = applyRequestedCustomization && options != null
+                ? options.AircraftLoadoutSource
+                : LoadoutSourceKind.Default;
+            if (source == LoadoutSourceKind.RandomStandardPreset)
+                resolved = HorusLoadoutService.ResolveRandomStandardForSpawn(definition, hq);
+            else if (applyRequestedCustomization && options?.AircraftLoadoutDraft != null)
+                resolved = HorusLoadoutService.ResolveForSpawn(definition, hq, options.AircraftLoadoutDraft);
+            else
+                resolved = HorusLoadoutService.ResolveDefaultForSpawn(definition, hq);
+
+            if (!resolved.Success && source != LoadoutSourceKind.Default)
+            {
+                string rejectionSummary = SummarizeLoadoutIssues(resolved);
+                HorusLog.Warning("Loadouts", $"Requested loadout for '{definition.unitName}' was invalid: {resolved.Message}. Falling back to default.");
+                HorusToasts.Show($"'{definition.unitName}' spawned with the DEFAULT loadout: your configured one was rejected — {rejectionSummary}");
+                resolved = HorusLoadoutService.ResolveDefaultForSpawn(definition, hq);
+            }
+            if (!resolved.Success)
+            {
+                LoadoutApplyResult validStandard = HorusLoadoutService.ResolveRandomStandardForSpawn(definition, hq);
+                if (validStandard.Success) resolved = validStandard;
+            }
+            if (resolved.Success)
+            {
+                result.Loadout = resolved.ResolvedLoadout;
+                result.FuelRatio = resolved.FuelRatio;
+            }
+            else
+            {
+                HorusLog.Warning("Loadouts", $"No valid pre-spawn loadout for '{definition.unitName}': {resolved.Message}");
+                HorusToasts.Show($"'{definition.unitName}' has no valid loadout to spawn with: {SummarizeLoadoutIssues(resolved)}");
+            }
+
+            if (applyRequestedCustomization && options != null)
+            {
+
+                AircraftLiveryMode liveryMode = (AircraftLiveryMode)options.AircraftLiveryMode;
+                if (parameters.liveries != null && parameters.liveries.Count > 0)
+                {
+                    int liveryIndex = 0;
+                    if (liveryMode == AircraftLiveryMode.FactionDefault)
+                        liveryIndex = parameters.GetFirstLiveryForFaction(hq != null ? hq.faction : null);
+                    else if (liveryMode == AircraftLiveryMode.Random)
+                        liveryIndex = parameters.GetRandomLiveryForFaction(hq != null ? hq.faction : null);
+                    else if (liveryMode == AircraftLiveryMode.Specific)
+                        liveryIndex = Mathf.Clamp(options.SelectedLiveryIndex, 0, parameters.liveries.Count - 1);
+                    result.Livery = new LiveryKey(liveryIndex);
+                }
+            }
+
+            return result;
+        }
+
+        /// <summary>Short, user-facing summary of why a loadout was rejected (hardpoint conflicts, HQ restrictions, etc.).</summary>
+        private static string SummarizeLoadoutIssues(LoadoutApplyResult resolved)
+        {
+            if (resolved?.Issues == null || resolved.Issues.Count == 0)
+                return resolved?.Message ?? "unknown reason";
+            var errors = new List<string>();
+            foreach (LoadoutValidationIssue issue in resolved.Issues)
+            {
+                if (issue.Severity != LoadoutIssueSeverity.Error) continue;
+                errors.Add(issue.ToString());
+                if (errors.Count >= 3) break;
+            }
+            return errors.Count > 0 ? string.Join("; ", errors) : resolved.Message;
+        }
+
         internal string[] GetGroupPresetNames()
         {
             if (cachedGroupPresetNames != null && cachedGroupFactionIndex == selectedFactionIndex)
@@ -1633,12 +1974,223 @@ namespace HorusMod.Core
         private int GetUnitCategoryIndex(UnitDefinition def)
         {
             if (def == null) return -1;
+            CatalogEntry entry = FindCatalogEntry(def);
+            if (entry != null)
+            {
+                switch (entry.SpawnKind)
+                {
+                    case SpawnKind.Aircraft: return 0;
+                    case SpawnKind.Vehicle: return 1;
+                    case SpawnKind.Ship: return 2;
+                    case SpawnKind.Building: return 3;
+                    case SpawnKind.Scenery: return 4;
+                    case SpawnKind.Missile: return 5;
+                    default: return 6;
+                }
+            }
             if (def is AircraftDefinition) return 0;
             if (def is VehicleDefinition) return 1;
             if (def is ShipDefinition) return 2;
             if (def is BuildingDefinition) return 3;
             if (def is SceneryDefinition) return 4;
-            return -1;
+            if (def is MissileDefinition) return 5;
+            return 6;
+        }
+
+        internal static CatalogEntry FindCatalogEntry(UnitDefinition definition)
+        {
+            return UnitCatalog.FindByDefinition(definition);
+        }
+
+        private static PlacementSurface GetPlacementSurface(UnitDefinition definition)
+        {
+            CatalogEntry entry = FindCatalogEntry(definition);
+            if (entry != null) return entry.PlacementSurface;
+            if (definition is AircraftDefinition) return PlacementSurface.Air;
+            if (definition is ShipDefinition) return PlacementSurface.Sea;
+            if (definition is VehicleDefinition || definition is BuildingDefinition || definition is SceneryDefinition)
+                return PlacementSurface.Ground;
+            return PlacementSurface.Free;
+        }
+
+        private static string CatalogIdentity(CatalogEntry entry)
+        {
+            if (entry == null) return "";
+            return !string.IsNullOrWhiteSpace(entry.Key) ? entry.Key : entry.JsonKey ?? "";
+        }
+
+        private bool CanAttemptCatalogSpawn(UnitDefinition definition, out string reason)
+        {
+            reason = null;
+            CatalogEntry entry = FindCatalogEntry(definition);
+            if (entry == null) return true;
+            string key = CatalogIdentity(entry);
+
+            if (entry.IsLookupOnly)
+            {
+                if (HorusPlugin.AllowIncompatibleContent == null || !HorusPlugin.AllowIncompatibleContent.Value)
+                {
+                    reason = "Enable 'Force incompatible content' in the warning panel first.";
+                    return false;
+                }
+                if (!acknowledgedLookupDefinitions.ContainsKey(key))
+                {
+                    reason = "Acknowledge this Lookup-only definition for the current session first.";
+                    return false;
+                }
+            }
+
+            if (entry.IsLiveOrdnance)
+            {
+                if (enableGroupSpawn)
+                {
+                    reason = "Live ordnance is restricted to individual Sandbox spawns.";
+                    return false;
+                }
+                if (economyManager != null && economyManager.CurrentMode == HorusMode.RtsCommander)
+                {
+                    reason = "Live ordnance is excluded from RTS mode.";
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        internal bool TryAuthorizeSpawnRequest(HorusSpawnRequest request, bool allowLiveOrdnance, out string reason)
+        {
+            reason = null;
+            if (request == null || request.Definition == null)
+            {
+                reason = "Spawn request has no definition.";
+                return false;
+            }
+
+            CatalogEntry entry = FindCatalogEntry(request.Definition);
+            request.Surface = entry?.PlacementSurface ?? GetPlacementSurface(request.Definition);
+            if (entry == null) return true;
+            string key = CatalogIdentity(entry);
+
+            if (entry.IsLookupOnly)
+            {
+                if (HorusPlugin.AllowIncompatibleContent == null || !HorusPlugin.AllowIncompatibleContent.Value ||
+                    !acknowledgedLookupDefinitions.ContainsKey(key))
+                {
+                    reason = "Lookup-only content has not been acknowledged for this session.";
+                    return false;
+                }
+                request.IncompatibleContentAcknowledgementKey = key;
+            }
+
+            // Missiles stay individual-only: they are excluded from group, factory,
+            // duplicate and undo routes, but no longer require a launch confirmation.
+            if (entry.IsLiveOrdnance && !allowLiveOrdnance)
+            {
+                reason = "Live ordnance is individual-only and cannot use this spawn route.";
+                return false;
+            }
+            return true;
+        }
+
+        private static CatalogEntry FindNavalResupplyCandidate()
+        {
+            CatalogEntry fallback = null;
+            for (int i = 0; i < UnitCatalog.CatalogEntries.Count; i++)
+            {
+                CatalogEntry entry = UnitCatalog.CatalogEntries[i];
+                if (entry?.Supply == null || entry.Supply.CanResupplyShips != CapabilityState.Yes) continue;
+                if (entry.Def == null || entry.Def.unitPrefab == null) continue;
+                string identity = (entry.JsonKey + " " + entry.Display).ToLowerInvariant();
+                if (identity.Contains("navalsupplycontainer1")) return entry;
+                if (fallback == null || identity.Contains("navalpallet1")) fallback = entry;
+            }
+            return fallback;
+        }
+
+        internal bool SpawnNavalResupplyQuick()
+        {
+            if (!HorusPermissions.CanSpawn()) return false;
+            UnitCatalog.EnsureBuilt(MissionManager.AllowEventContent);
+            CatalogEntry entry = FindNavalResupplyCandidate();
+            if (entry == null)
+            {
+                HorusToasts.Show("No component-compatible naval Rearmer definition was found");
+                return false;
+            }
+            if (!CanAttemptCatalogSpawn(entry.Def, out string denial))
+            {
+                HorusToasts.Show("Naval resupply blocked: " + denial);
+                return false;
+            }
+
+            Ship selectedShip = null;
+            if (worldSelection != null)
+            {
+                for (int i = 0; i < worldSelection.Units.Count; i++)
+                    if (worldSelection.Units[i] is Ship ship) { selectedShip = ship; break; }
+            }
+
+            FactionHQ hq = selectedShip != null ? selectedShip.NetworkHQ : GetHQSafe(selectedFactionIndex);
+            if (hq == null)
+            {
+                HorusToasts.Show("Naval resupply requires a playable faction/HQ; Neutral is not supported");
+                return false;
+            }
+
+            Vector3 localPosition;
+            Quaternion rotation;
+            if (selectedShip != null)
+            {
+                float range = entry.Supply.RearmRange ?? 200f;
+                float offset = range > 0f
+                    ? Mathf.Clamp(range * 0.35f, Mathf.Min(1f, range * 0.1f), Mathf.Max(1f, range * 0.8f))
+                    : 25f;
+                localPosition = selectedShip.transform.position + selectedShip.transform.right * offset;
+                rotation = Quaternion.Euler(0f, selectedShip.transform.eulerAngles.y, 0f);
+            }
+            else if (inputRouter != null && inputRouter.Pick.Valid)
+            {
+                localPosition = inputRouter.Pick.Point;
+                rotation = Quaternion.Euler(0f, spawnYaw, 0f);
+            }
+            else
+            {
+                HorusToasts.Show("Aim at the water or select a ship first");
+                return false;
+            }
+            localPosition.y = GetOceanLevel() + entry.Def.spawnOffset.y;
+
+            var request = new HorusSpawnRequest
+            {
+                Definition = entry.Def,
+                Position = localPosition.ToGlobalPosition(),
+                Rotation = rotation,
+                HQ = hq,
+                UniqueName = (entry.JsonKey ?? "naval_supply") + "_" + Guid.NewGuid().ToString("N").Substring(0, 8)
+            };
+            if (!TryAuthorizeSpawnRequest(request, false, out string authorizationError))
+            {
+                HorusToasts.Show("Naval resupply blocked: " + authorizationError);
+                return false;
+            }
+            HorusSpawnResult result = HorusSpawnService.Spawn(request);
+            if (!result.Success)
+            {
+                HorusToasts.Show("Naval resupply failed: " + result.Message);
+                return false;
+            }
+
+            AddHorusSpawnedUnit(result.Unit);
+            HorusUndo.RecordSpawn(result.Unit);
+            HorusPrefs.AddRecent(entry.JsonKey);
+            if (selectedShip != null)
+            {
+                try { selectedShip.RequestRearm(); }
+                catch (Exception ex) { HorusLog.Warning("Supply", "Could not request ship rearm: " + ex.Message); }
+            }
+            lastSpawnResult = "Spawned naval resupply: " + entry.Display;
+            HorusToasts.Show(lastSpawnResult);
+            return true;
         }
 
         public static Faction GetFactionSafe(int index)
@@ -1680,10 +2232,33 @@ namespace HorusMod.Core
                 return;
             }
 
+            for (int i = 0; i < units.Count; i++)
+            {
+                CatalogEntry groupEntry = FindCatalogEntry(units[i]);
+                if (groupEntry != null && groupEntry.IsLiveOrdnance)
+                {
+                    lastSpawnResult = "Blocked: live ordnance cannot be spawned in groups.";
+                    HorusToasts.Show(lastSpawnResult);
+                    return;
+                }
+                if (!CanAttemptCatalogSpawn(units[i], out string groupDenial))
+                {
+                    lastSpawnResult = "Blocked: " + groupDenial;
+                    HorusToasts.Show(lastSpawnResult);
+                    return;
+                }
+            }
+
             // RTS transaction validation
             RtsTransaction tx = null;
             if (economyManager != null && economyManager.CurrentMode == HorusMode.RtsCommander)
             {
+                if (HorusPlugin.RequireDeploymentConfirmation.Value && !IsSameArmedGroup(units))
+                {
+                    economyManager.ArmGroupDeployment(units, selectedFactionIndex);
+                    SceneSingleton<GameplayUI>.i?.GameMessage($"Horus: Group x{units.Count} armed. Click again to deploy.");
+                    return;
+                }
                 tx = economyManager.CreateGroupTransaction(units, selectedFactionIndex);
                 if (!tx.IsValid)
                 {
@@ -1700,8 +2275,6 @@ namespace HorusMod.Core
             
             Quaternion rot = GetPlacementRotation();
             var offsets = FormationSolver.GetOffsets(units.Count, groupSpacing, CurrentFormation);
-            PlacementOptions groupOptions = CapturePlacementOptions();
-
             HorusLog.Verbose("Spawn", $"Spawning group of {units.Count} unit(s).");
 
             var spawnedUnits = new List<Unit>();
@@ -1722,20 +2295,35 @@ namespace HorusMod.Core
                 if (IsShipDefinition(def) || unitCat == 2) // Ship
                 {
                     float shipYaw = NormalizeAngle(rot.eulerAngles.y);
-                    spawned = SpawnShipSafe(def, globalPos, shipYaw, selectedFactionIndex);
+                    spawned = SpawnShipSafe(def, globalPos, shipYaw, selectedFactionIndex, spawnStationary);
                 }
                 else
                 {
                     string uniqueName = (def.jsonKey ?? "unit") + "_" + System.Guid.NewGuid().ToString("N").Substring(0, 8);
-                    spawned = Spawner.i.SpawnFromUnitDefinitionInEditor(def, globalPos, rot, hq, uniqueName);
+                    var request = new HorusSpawnRequest
+                    {
+                        Definition = def,
+                        Position = globalPos,
+                        Rotation = rot,
+                        HQ = hq,
+                        UniqueName = uniqueName,
+                        Stationary = spawnStationary
+                    };
+                    if (def is AircraftDefinition aircraftDefinition)
+                    {
+                        PlacementOptions aircraftOptions = CapturePlacementOptions(def);
+                        request.Aircraft = BuildAircraftSpawnOptions(aircraftDefinition, hq, aircraftOptions,
+                            aircraftOptions.ApplyAircraftToWholeGroup);
+                    }
+                    if (!TryAuthorizeSpawnRequest(request, false, out string authorizationError))
+                    {
+                        HorusLog.Warning("Spawn", $"Group member '{def.unitName}' blocked: {authorizationError}");
+                        continue;
+                    }
+                    spawned = HorusSpawnService.Spawn(request).Unit;
                     if (spawned != null)
                     {
                         horusSpawnedUnits.Add(spawned);
-                        if (groupOptions.ApplyAircraftToWholeGroup && spawned is Aircraft acGroup)
-                        {
-                            ApplyAircraftCustomizationIfApplicable(acGroup, hq, groupOptions);
-                        }
-
                         if (spawnStationary)
                         {
                             if (spawned is GroundVehicle vehicle)
@@ -1763,7 +2351,21 @@ namespace HorusMod.Core
                     economyManager.DisarmDeployment();
                 }
             }
-            if (spawnedUnits.Count > 0) HorusToasts.Show($"Spawned group: {spawnedUnits.Count} unit(s)");
+            if (spawnedUnits.Count > 0)
+            {
+                lastPlacementConsumed = true;
+                HorusToasts.Show($"Spawned group: {spawnedUnits.Count} unit(s)");
+            }
+        }
+
+        private bool IsSameArmedGroup(List<UnitDefinition> units)
+        {
+            List<UnitDefinition> armed = economyManager?.ArmedGroupDefinitions;
+            if (armed == null || units == null || !economyManager.IsDeploymentArmed || armed.Count != units.Count)
+                return false;
+            for (int i = 0; i < units.Count; i++)
+                if (!ReferenceEquals(armed[i], units[i])) return false;
+            return true;
         }
 
         private void RefreshSavedCustomGroups()
@@ -1816,7 +2418,14 @@ namespace HorusMod.Core
                 
                 foreach (var unit in customGroupUnits)
                 {
-                    if (unit != null) data.unitNames.Add(!string.IsNullOrEmpty(unit.jsonKey) ? unit.jsonKey : unit.unitName);
+                    if (unit == null) continue;
+                    CatalogEntry entry = FindCatalogEntry(unit);
+                    if (unit is MissileDefinition || entry?.IsLiveOrdnance == true)
+                    {
+                        HorusLog.Warning("Core", $"Custom Group '{name}': live ordnance '{unit.unitName}' was not saved.");
+                        continue;
+                    }
+                    data.unitNames.Add(!string.IsNullOrEmpty(unit.jsonKey) ? unit.jsonKey : unit.unitName);
                 }
                 
                 string json = UnityEngine.JsonUtility.ToJson(data, true);
@@ -1865,6 +2474,12 @@ namespace HorusMod.Core
                         UnitDefinition found = FindUnitDefinitionByName(uname);
                         if (found != null)
                         {
+                            CatalogEntry entry = FindCatalogEntry(found);
+                            if (found is MissileDefinition || entry?.IsLiveOrdnance == true)
+                            {
+                                HorusLog.Warning("Core", $"Custom Group '{name}': live ordnance '{uname}' is individual-only. Skipping.");
+                                continue;
+                            }
                             customGroupUnits.Add(found);
                         }
                         else
@@ -1917,24 +2532,14 @@ namespace HorusMod.Core
         internal UnitDefinition FindUnitDefinitionByName(string name)
         {
             if (Encyclopedia.i == null) return null;
-            var lists = new System.Collections.Generic.List<System.Collections.IEnumerable> {
-                Encyclopedia.i.aircraft,
-                Encyclopedia.i.vehicles,
-                Encyclopedia.i.ships,
-                Encyclopedia.i.buildings,
-                Encyclopedia.i.scenery
-            };
-            foreach (var list in lists)
+            UnitCatalog.EnsureBuilt(MissionManager.AllowEventContent);
+            UnitEntry exact = UnitCatalog.Find(name);
+            if (exact != null) return exact.Def;
+            for (int i = 0; i < UnitCatalog.Entries.Count; i++)
             {
-                foreach (var obj in list)
-                {
-                    if (obj is UnitDefinition def &&
-                        (string.Equals(def.jsonKey, name, System.StringComparison.OrdinalIgnoreCase) ||
-                         string.Equals(def.unitName, name, System.StringComparison.OrdinalIgnoreCase)))
-                    {
-                        return def;
-                    }
-                }
+                UnitEntry entry = UnitCatalog.Entries[i];
+                if (entry?.Def != null && string.Equals(entry.Def.unitName, name, StringComparison.OrdinalIgnoreCase))
+                    return entry.Def;
             }
             return null;
         }
@@ -2073,7 +2678,7 @@ namespace HorusMod.Core
                     return;
                 }
 
-                ghost.UpdateTransform(GetFinalPlacementPosition(pick.Point, applySpacing: false), GetPlacementRotation());
+                ghost.UpdateTransform(GetFinalPlacementPosition(pick.Point, applySpacing: false), GetGhostPlacementRotation());
                 ghost.SetVisible(true);
             }
         }
@@ -2192,6 +2797,13 @@ namespace HorusMod.Core
 
             UnitDefinition def = GetSelectedDefinition();
             if (def == null) return;
+            if (!CanAttemptCatalogSpawn(def, out string catalogDenial))
+            {
+                lastSpawnResult = "Blocked: " + catalogDenial;
+                HorusToasts.Show(lastSpawnResult);
+                HorusLog.Warning("Spawn", lastSpawnResult);
+                return;
+            }
             PlacementOptions placementOptions = CapturePlacementOptions(def);
 
             // RTS Commander Mode: transaction validation
@@ -2230,6 +2842,15 @@ namespace HorusMod.Core
             Faction faction = GetFactionSafe(selectedFactionIndex);
             FactionHQ hq = GetHQSafe(selectedFactionIndex);
 
+            CatalogEntry selectedCatalogEntry = FindCatalogEntry(def);
+            if (hq == null && selectedCatalogEntry?.Supply != null &&
+                (selectedCatalogEntry.Supply.HasRearmer || selectedCatalogEntry.Supply.HasRefueler))
+            {
+                lastSpawnResult = "Blocked: functional resupply requires a playable faction/HQ; Neutral cannot rearm units.";
+                HorusToasts.Show(lastSpawnResult);
+                return;
+            }
+
             GlobalPosition globalPos = position.ToGlobalPosition();
             Quaternion rotation = GetPlacementRotation();
 
@@ -2237,20 +2858,55 @@ namespace HorusMod.Core
             if (IsShipDefinition(def) || selectedCategoryIndex == 2) // Ship
             {
                 float shipYaw = NormalizeAngle(rotation.eulerAngles.y);
-                spawned = SpawnShipSafe(def, globalPos, shipYaw, selectedFactionIndex);
+                spawned = SpawnShipSafe(def, globalPos, shipYaw, selectedFactionIndex, spawnStationary);
             }
             else
             {
                 string uniqueName = (def.jsonKey ?? "unit") + "_" + System.Guid.NewGuid().ToString("N").Substring(0, 8);
-                spawned = Spawner.i.SpawnFromUnitDefinitionInEditor(def, globalPos, rotation, hq, uniqueName);
+                var request = new HorusSpawnRequest
+                {
+                    Definition = def,
+                    Position = globalPos,
+                    Rotation = rotation,
+                    HQ = hq,
+                    UniqueName = uniqueName,
+                    Stationary = spawnStationary
+                };
+                if (def is AircraftDefinition aircraftDefinition)
+                    request.Aircraft = BuildAircraftSpawnOptions(aircraftDefinition, hq, placementOptions, true);
+                if (def is MissileDefinition)
+                {
+                    // The click sets the spawn X/Z (already lifted by the current placement
+                    // altitude). Fire straight down from there so impact lands exactly where
+                    // the operator clicked, instead of the old fixed placement-rotation
+                    // heading (spawnYaw), which never pointed at the click location at all.
+                    request.Rotation = Quaternion.LookRotation(Vector3.down, Vector3.forward);
+                    request.MissileLaunchSpeed = missileLaunchSpeed;
+                    request.MissileLaunchElevation = 0f;
+                    // Opt-in only: native guidance steers toward the target's actual position,
+                    // not the click point, so this must not engage just because something is
+                    // incidentally selected -- that would silently break "click = impact".
+                    if (missileGuideToSelectedTarget && worldSelection != null &&
+                        worldSelection.Count == 1 && worldSelection.Units[0] != null)
+                        request.TargetUnitName = worldSelection.Units[0].UniqueName;
+                }
+                if (!TryAuthorizeSpawnRequest(request, selectedCatalogEntry?.IsLiveOrdnance == true,
+                    out string authorizationError))
+                {
+                    lastSpawnResult = "Blocked: " + authorizationError;
+                    HorusToasts.Show(lastSpawnResult);
+                    return;
+                }
+                HorusSpawnResult spawnResult = HorusSpawnService.Spawn(request);
+                spawned = spawnResult.Unit;
+                if (!spawnResult.Success)
+                {
+                    lastSpawnResult = "Spawn failed: " + spawnResult.Message;
+                    HorusToasts.Show(lastSpawnResult);
+                }
                 if (spawned != null)
                 {
                     horusSpawnedUnits.Add(spawned);
-                    if (spawned is Aircraft ac)
-                    {
-                        ApplyAircraftCustomizationIfApplicable(ac, hq, placementOptions);
-                    }
-
                     if (spawnStationary)
                     {
                         if (spawned is GroundVehicle vehicle)
@@ -2258,7 +2914,15 @@ namespace HorusMod.Core
                             vehicle.SetHoldPosition(true);
                         }
                     }
-                    
+                    // Same diagnostic for every definition type that hit the Rigidbody-desync
+                    // bug (missile, pilot, container) so a regression on any of them shows up
+                    // in the log the same way instead of needing another repro/report cycle.
+                    bool isRigidbodyProneSpawn = def is MissileDefinition ||
+                        def.unitPrefab.GetComponent<PilotDismounted>() != null ||
+                        def.unitPrefab.GetComponent<Container>() != null;
+                    if (isRigidbodyProneSpawn)
+                        StartCoroutine(TrackSpawnTrajectory(spawned, globalPos));
+
                     if (HorusPlugin.CreditKillsToSpawner.Value)
                     {
                         try 
@@ -2292,9 +2956,39 @@ namespace HorusMod.Core
                 lastSpawnResult = $"Spawned {def.unitName}.";
                 HorusToasts.Show($"Spawned {def.unitName}");
             }
+
         }
 
-        internal Unit SpawnShipSafe(UnitDefinition def, GlobalPosition globalPos, float yaw, int faction)
+        /// <summary>
+        /// Diagnostic-only: logs a spawned unit's actual position every 0.25s for 5s after
+        /// spawn, so a post-spawn snap/drift away from the intended spawn point (Rigidbody
+        /// desync, native flight/guidance behavior, etc.) is directly visible in the log
+        /// instead of inferred. Used for definition types previously found susceptible to the
+        /// native Rigidbody-position-desync bug: missiles, pilots, containers.
+        /// </summary>
+        private System.Collections.IEnumerator TrackSpawnTrajectory(Unit unit, GlobalPosition intendedPosition)
+        {
+            string label = unit != null ? unit.unitName : "?";
+            for (int i = 0; i < 20; i++)
+            {
+                yield return new WaitForSeconds(0.25f);
+                float elapsed = (i + 1) * 0.25f;
+                if (unit == null || unit.gameObject == null || unit.disabled)
+                {
+                    HorusLog.Info("Placement", $"Trajectory '{label}': gone/disabled at t={elapsed:F2}s.");
+                    yield break;
+                }
+                GlobalPosition current = unit.GlobalPosition();
+                Vector3 delta = current.AsVector3() - intendedPosition.AsVector3();
+                float horizDrift = new Vector2(delta.x, delta.z).magnitude;
+                HorusLog.Info("Placement",
+                    $"Trajectory '{label}' t={elapsed:F2}s: pos=({current.x:F1},{current.y:F1},{current.z:F1}) " +
+                    $"deltaFromSpawn=({delta.x:F1},{delta.y:F1},{delta.z:F1}) horizDrift={horizDrift:F1}.");
+            }
+        }
+
+        internal Unit SpawnShipSafe(UnitDefinition def, GlobalPosition globalPos, float yaw, int faction,
+            bool stationary = false)
         {
             HorusLog.Trace("Spawn", "ShipSafe", "Entering safe ship spawn.", 0.25f);
             if (Spawner.i == null)
@@ -2328,16 +3022,25 @@ namespace HorusMod.Core
 
             string uniqueName = (def.jsonKey ?? "ship") + "_" + System.Guid.NewGuid().ToString("N").Substring(0, 8);
             Unit spawned = null;
-            try
+            var request = new HorusSpawnRequest
             {
-                spawned = Spawner.i.SpawnShip(def.unitPrefab, spawnGlobalPos, rot, hq, uniqueName, 1f, false);
-                HorusLog.Verbose("Spawn", $"Spawned ship '{uniqueName}' through SpawnShip.");
-            }
-            catch (Exception ex)
+                Definition = def,
+                Position = spawnGlobalPos,
+                Rotation = rot,
+                HQ = hq,
+                UniqueName = uniqueName,
+                Stationary = stationary
+            };
+            if (!TryAuthorizeSpawnRequest(request, false, out string authorizationError))
             {
-                HorusLog.Warning("Spawn", $"SpawnShip failed: {ex.Message}. Falling back to editor spawn.");
-                spawned = Spawner.i.SpawnFromUnitDefinitionInEditor(def, spawnGlobalPos, rot, hq, uniqueName);
+                HorusLog.Warning("Spawn", $"SpawnShip blocked: {authorizationError}");
+                HorusToasts.Show("Ship spawn blocked: " + authorizationError);
+                return null;
             }
+            HorusSpawnResult spawnResult = HorusSpawnService.Spawn(request);
+            spawned = spawnResult.Unit;
+            if (!spawnResult.Success)
+                HorusLog.Warning("Spawn", $"SpawnShip failed: {spawnResult.Message}");
 
             if (spawned != null)
             {
@@ -2364,7 +3067,7 @@ namespace HorusMod.Core
                 horusSpawnedUnits.Add(spawned);
 
                 // Handle stationary if toggled
-                if (spawnStationary && spawned is Ship ship)
+                if (stationary && spawned is Ship ship)
                 {
                     ship.SetHoldPosition(true);
                 }
@@ -2440,17 +3143,9 @@ namespace HorusMod.Core
         internal bool IsShipDefinition(UnitDefinition def)
         {
             if (def == null) return false;
-
-            if (def.unitPrefab != null)
-            {
-                if (def.unitPrefab.GetComponent<Ship>() != null) return true;
-                if (def.unitPrefab.GetComponentInChildren<Ship>(true) != null) return true;
-            }
-
-            string n = (def.unitName ?? def.name ?? "").ToLowerInvariant();
-            if (n.Contains("ship") || n.Contains("boat") || n.Contains("naval")) return true;
-
-            return false;
+            CatalogEntry entry = FindCatalogEntry(def);
+            if (entry != null) return entry.SpawnKind == SpawnKind.Ship;
+            return def is ShipDefinition || (def.unitPrefab != null && def.unitPrefab.GetComponent<Ship>() != null);
         }
 
     }

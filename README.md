@@ -2,6 +2,9 @@
 
 A Game Master/Free Camera utility mod for Nuclear Option (formerly known as Zeus Mod). Horus allows the host or local player to spawn aircraft, vehicles, ships, and buildings in real time.
 
+> [!NOTE]
+> The v1.3.0 capabilities documented below are currently **unreleased**. v1.2.4 remains the published rollback point. Lookup-only content, live ordnance, mod-provided definitions, and naval resupply remain experimental until they pass in-game validation.
+
 ## Features
 - Toggle Horus Mode (Free Camera + UI) with **F9**.
 - Toggle UI visibility with **F10**.
@@ -10,6 +13,10 @@ A Game Master/Free Camera utility mod for Nuclear Option (formerly known as Zeus
 - Select units with **Left Click**, add with **Shift + Left Click**, or drag a selection box.
 - Issue formation-aware move orders with a quick **Right Click**; hold/drag right mouse to rotate the camera.
 - Open a contextual unit menu with **Right Click on a unit** (or **Alt + Right Click** anywhere) for orders, loadouts, skins/liveries, skill, duplication, focus, and deletion.
+- Customize aircraft for the next spawn or after selection with independent state, native standard presets, named Horus presets, session loadouts, and per-hardpoint weapon choices.
+- Save aircraft-specific Horus loadout presets in `BepInEx/config/HorusMod/aircraft_loadouts.json` using stable definition keys.
+- Browse aircraft, vehicles, ships, buildings, scenery, containers/other units, and experimental live ordnance; refresh the catalog when another mod registers content late.
+- Inspect logistics capabilities such as ammunition rearming, naval resupply, refueling, storage, and warhead storage without treating decorative props as functional supply objects.
 - Move ground units, ships, and host-controlled AI aircraft in formations; aircraft orders use their native server autopilot and never override a player-controlled aircraft.
 - **Safe middle-click delete**: only removes units spawned by Horus (terrain, roads, buildings and original map objects are protected).
 - **Ghost preview**: see a semi-transparent preview of the selected unit at the placement position before spawning.
@@ -69,6 +76,51 @@ Open the **Placement Tools** section in the Horus window to control how units ar
 - **Align to Surface Normal** (experimental): tilts ground units to match the terrain slope.
 - **Grid Snap**: aligns the placement position to a configurable spacing (1–100m or custom) for tidy rows and bases.
 - **Rotation Snap**: snaps yaw to fixed increments (1° / 5° / 15° / 45° / 90°).
+
+### Aircraft Loadouts, Liveries, and Hardpoints
+
+Aircraft customization has two separate targets: **Next Spawn** controls aircraft that have not been placed yet, while **Selected Aircraft** edits compatible aircraft already in the mission. Changing one target does not silently replace the other target's draft.
+
+Available loadout sources are:
+
+- **Default**: resolve Nuclear Option's native default into a fresh loadout before the aircraft is published on the network.
+- **Standard Preset**: use a valid preset exposed by `AircraftParameters.StandardLoadouts`.
+- **Current Session**: copy Nuclear Option's temporary `GameManager.aircraftCustomization` selection when available. This is session data, not a persistent game-wide custom-loadout library.
+- **Horus Saved Preset**: load a named, aircraft-specific preset from `BepInEx/config/HorusMod/aircraft_loadouts.json`.
+- **Copy Current Aircraft**: start from the loadout currently installed on the selected aircraft.
+- **Custom Hardpoints**: choose a compatible weapon for each native `HardpointSet`.
+
+A hardpoint entry can represent more than one visible pylon, including a symmetric pair. Manual and Horus-saved choices are limited to the mounts advertised by that `HardpointSet`; exclusions, HQ restrictions, event restrictions, and nuclear escalation rules are validated before application. Trusted native presets/session data may preserve hidden native mounts as read-only choices. Compatible mod aircraft can use the hardpoint editor even when they expose no standard presets.
+
+Named Horus presets are unique per aircraft `jsonKey` and can be created, duplicated, renamed, deleted, and applied. Applying to several selected aircraft is allowed only when every aircraft uses the same definition; a mixed-model selection is rejected instead of applying a partial loadout.
+
+Ground vehicles and ships have fixed weapon installations in the current game API. Horus can diagnose or use supported rearming behavior, but it does not present those units as having interchangeable aircraft-style loadouts.
+
+### Expanded Catalog, Props, and Experimental Content
+
+The catalog distinguishes an object's spawn kind, placement surface, registration state, and functional capabilities. It includes the native aircraft, vehicle, ship, building, scenery, missile, and `otherUnits` collections, plus requested lookup-only definitions. **Network Registered** means that the definition is present in the game's runtime `IndexLookup`; it does not guarantee that every remote client owns compatible third-party assets.
+
+- Use **Refresh Catalog** after enabling or loading another content mod if its definitions do not appear immediately.
+- Unnamed definitions are shown as `??? · jsonKey` and carry status badges such as `Unlabeled`, `Experimental`, `Disabled`, `Event`, `Modded`, or `Lookup Only` when detectable.
+- `WeaponMount` definitions are choices for the hardpoint editor; they are not independent world props and are never offered as spawnable units.
+- **Force incompatible content** is disabled by default. Enabling it allows a confirmed per-session attempt to spawn lookup-only definitions, but cannot make an unregistered prefab network-safe. Such objects may fail, throw game errors, or desynchronize multiplayer clients.
+
+#### Logistics and Naval Resupply
+
+Horus identifies supply objects by their actual prefab components rather than words such as "naval" or "ammo" in their names:
+
+- `Rearmer` reports ammunition support, linked unit, range, capacity, and single-use behavior. The current 0.34 API accepts a generic `Unit`; older/modded variants with per-surface flags are honored when present.
+- `Refueler` reports fuel support.
+- `UnitStorage` reports unit storage/deployment and is not classified as ammunition rearming.
+- `WarheadStorage` reports warhead stock and is not classified as ordinary naval ammunition.
+
+Catalog filters include **Logistics**, **Ammo**, **Naval Resupply**, **Fuel**, and **Storage**. The detail panel reports `Can resupply ships: yes`, `no`, or `unknown`; `yes` means the prefab exposes an operational generic `Rearmer` (or an explicit naval flag on older/modded APIs), not that a live rearm cycle has already been proven. **Spawn Naval Resupply** is offered only for that component-level capability. With a ship selected, Horus inherits its non-neutral HQ/faction, places the supply inside the detected `Rearmer` range, and asks the ship to `RequestRearm()` after spawning the object. Neutral supply is rejected.
+
+`NavalSupplyContainer1` and `NavalPallet1` are component-compatible validation candidates, not guaranteed end-to-end resupply objects. Their catalog result may be `yes` because the current game exposes a generic `Rearmer.ProcessRearmRequest(Unit)` path and their serialized configuration passes inspection, while actual ammunition recovery and any single-use consumption remain unverified until an in-game test completes without new errors in `LogOutput.log`.
+
+#### Live Ordnance
+
+Native `MissileDefinition` entries appear as **Live Ordnance**. They can be placed only as individual spawns and are excluded from groups, repeat placement, RTS/factory queues, and saved group presets. Every missile requires an explicit confirmation; nuclear or strategic ordnance requires a second confirmation. This remains experimental, especially for lookup-only definitions and multiplayer.
 
 ### Groups & Formations
 Open the **Groups & Formations** section in the Horus window to control group spawning:
@@ -136,7 +188,7 @@ If you do have Horus installed, the UI shows your current mode:
 - **Multiplayer Host** — full access.
 - **Client (View Only)** — spawning, deleting, and budget adjustments are blocked by default.
 
-Dedicated/headless command transport is intentionally out of scope; this release does not ship placeholder client/server command APIs.
+Dedicated/headless command transport is intentionally out of scope for v1.3.0. Horus currently supports single player and local-host authority only; installing the current DLL on a dedicated server does not provide a remote Game Master interface. The planned server design uses a headless-safe runtime, authenticated SteamID allowlist, versioned Mirage messages, rate limits, deduplication, server-side validation, and audit logs. Nuclear Option's loopback server-command TCP endpoint will not be reused as an unauthenticated gameplay-control channel. See [ROADMAP.md](ROADMAP.md) for the staged design.
 
 ### Map Spawn Mode
 1. Enable **Map Spawn: ON** in the Horus window (this also opens the map).
@@ -150,6 +202,10 @@ Dedicated/headless command transport is intentionally out of scope; this release
 - **"Cannot spawn units"**: In multiplayer, only the Host can spawn or delete units.
 - **"Ctrl/Alt + Scroll does nothing"**: The shortcuts read the game's mouse-wheel (Rewired "Zoom View") input. If the direction feels reversed, set `Placement / InvertScrollDirection = true` in the BepInEx config.
 - **"Middle click won't delete a unit"**: By design, only units spawned by Horus are deletable. See **Safe Delete** above.
+- **"My aircraft has no standard loadouts"**: Try **Custom Hardpoints**. Some aircraft, especially mod aircraft, expose compatible hardpoint sets but no `StandardLoadouts`; others have fixed or incomplete weapon data and cannot be edited safely.
+- **"A mod aircraft or `???` is missing"**: Click **Refresh Catalog**. If it appears only as `Lookup Only`, spawning requires **Force incompatible content** and its per-session warning; this does not guarantee multiplayer compatibility.
+- **"The naval supply object does not rearm my ship"**: Check `Can resupply ships`. `unknown` means the prefab has not been functionally verified, while `no` means no naval `Rearmer` capability was detected. Storage or decorative containers do not automatically supply ammunition.
+- **"Can Horus control a dedicated server?"**: Not yet. v1.3.0 has no supported headless admin transport; use Horus only in single player or as the local multiplayer host.
 
 ## Compatibility
 Compatible with NOMM/NOMNOM mod managers.

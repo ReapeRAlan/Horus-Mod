@@ -1,5 +1,7 @@
 namespace HorusMod.Placement
 {
+    using HorusMod.Loadouts;
+
     /// <summary>
     /// Immutable placement state captured at the boundary between UI/input and spawning.
     /// This prevents a spawn operation from observing half-updated editor fields.
@@ -23,6 +25,8 @@ namespace HorusMod.Placement
         public int SelectedLoadoutIndex { get; }
         public float Skill { get; }
         public bool ApplyAircraftToWholeGroup { get; }
+        public LoadoutSourceKind AircraftLoadoutSource { get; }
+        public LoadoutDraft AircraftLoadoutDraft { get; }
 
         public PlacementOptions(
             UnitDefinition definition,
@@ -41,7 +45,9 @@ namespace HorusMod.Placement
             int selectedLiveryIndex,
             int selectedLoadoutIndex,
             float skill,
-            bool applyAircraftToWholeGroup)
+            bool applyAircraftToWholeGroup,
+            LoadoutSourceKind aircraftLoadoutSource = LoadoutSourceKind.Default,
+            LoadoutDraft aircraftLoadoutDraft = null)
         {
             Definition = definition;
             FactionIndex = factionIndex;
@@ -60,6 +66,8 @@ namespace HorusMod.Placement
             SelectedLoadoutIndex = selectedLoadoutIndex;
             Skill = UnityEngine.Mathf.Clamp01(skill);
             ApplyAircraftToWholeGroup = applyAircraftToWholeGroup;
+            AircraftLoadoutSource = aircraftLoadoutSource;
+            AircraftLoadoutDraft = aircraftLoadoutDraft?.Clone();
         }
     }
 }

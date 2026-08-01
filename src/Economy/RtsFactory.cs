@@ -63,6 +63,8 @@ namespace HorusMod.Economy
         public bool isVirtual;
         public string visualBuilding;
         public string lastStatus;
+        public float nextAnchorRetryTime;
+        public int anchorSpawnFailures;
     }
 
     // ─── Serialization Models ──────────────────────────────────────────────────

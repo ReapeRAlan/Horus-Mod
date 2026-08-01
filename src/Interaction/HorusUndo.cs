@@ -4,6 +4,9 @@ using Mirage;
 using NuclearOption.SavedMission;
 using UnityEngine;
 using HorusMod.UI;
+using HorusMod.Spawning;
+using HorusMod.Data;
+using HorusMod.Loadouts;
 
 namespace HorusMod.Interaction
 {
@@ -54,6 +57,7 @@ namespace HorusMod.Interaction
             private readonly bool wasShip;
             private readonly Loadout aircraftLoadout;
             private readonly LiveryKey aircraftLivery;
+            private readonly float aircraftFuel;
             private readonly float skill;
             private readonly float bravery;
             private readonly int factionIndex;
@@ -72,8 +76,9 @@ namespace HorusMod.Interaction
                 wasShip = unit is Ship;
                 if (unit is Aircraft aircraft)
                 {
-                    aircraftLoadout = aircraft.Networkloadout;
+                    aircraftLoadout = HorusLoadoutService.CloneLoadout(aircraft.Networkloadout);
                     aircraftLivery = aircraft.NetworkLiveryKey;
+                    aircraftFuel = aircraft.NetworkfuelLevel;
                     skill = aircraft.skill;
                     bravery = aircraft.bravery;
                 }
@@ -109,20 +114,36 @@ namespace HorusMod.Interaction
                 if (wasShip && HorusMod.Core.HorusManager.Instance != null)
                     unit = HorusMod.Core.HorusManager.Instance.SpawnShipSafe(definition, position, rotation.eulerAngles.y, factionIndex);
                 else
-                    unit = Spawner.i.SpawnFromUnitDefinitionInEditor(
-                        definition,
-                        position,
-                        rotation,
-                        hq,
-                        (definition.jsonKey ?? "horus") + "_redo_" + System.Guid.NewGuid().ToString("N").Substring(0, 6));
+                {
+                    var request = new HorusSpawnRequest
+                    {
+                        Definition = definition,
+                        Position = position,
+                        Rotation = rotation,
+                        HQ = hq,
+                        UniqueName = (definition.jsonKey ?? "horus") + "_redo_" + System.Guid.NewGuid().ToString("N").Substring(0, 6),
+                        Skill = skill
+                    };
+                    if (wasAircraft)
+                    {
+                        request.Aircraft = new AircraftSpawnOptions
+                        {
+                            Loadout = aircraftLoadout,
+                            FuelRatio = aircraftFuel,
+                            Livery = aircraftLivery,
+                            Skill = skill,
+                            Bravery = bravery
+                        };
+                    }
+                    HorusMod.Core.HorusManager manager = HorusMod.Core.HorusManager.Instance;
+                    if (manager != null && !manager.TryAuthorizeSpawnRequest(request, false, out _)) return;
+                    unit = HorusSpawnService.Spawn(request).Unit;
+                }
                 if (unit == null) return;
                 HorusMod.Core.HorusManager.Instance?.AddHorusSpawnedUnit(unit);
                 if (wasAircraft && unit is Aircraft aircraft)
                 {
-                    aircraft.Networkloadout = aircraftLoadout;
-                    aircraft.SetLiveryKey(aircraftLivery, true);
-                    aircraft.skill = skill;
-                    aircraft.bravery = bravery;
+                    // Aircraft state was supplied before the native network spawn.
                 }
                 else if (wasVehicle && unit is GroundVehicle vehicle)
                 {
@@ -156,12 +177,18 @@ namespace HorusMod.Interaction
 
         public static void RecordSpawn(Unit unit)
         {
-            if (unit != null) Push(new SpawnDeleteAction(unit, undoDeletes: true));
+            if (unit != null && !IsLiveOrdnance(unit.definition)) Push(new SpawnDeleteAction(unit, undoDeletes: true));
         }
 
         public static void RecordDelete(Unit unit)
         {
-            if (unit != null) Push(new SpawnDeleteAction(unit, undoDeletes: false));
+            if (unit != null && !IsLiveOrdnance(unit.definition)) Push(new SpawnDeleteAction(unit, undoDeletes: false));
+        }
+
+        private static bool IsLiveOrdnance(UnitDefinition definition)
+        {
+            return definition is MissileDefinition ||
+                HorusMod.Core.HorusManager.FindCatalogEntry(definition)?.IsLiveOrdnance == true;
         }
 
         public static void Undo()

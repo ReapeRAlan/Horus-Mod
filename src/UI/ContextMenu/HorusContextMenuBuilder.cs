@@ -3,6 +3,8 @@ using HorusMod.Core;
 using HorusMod.Interaction;
 using HorusMod.Networking;
 using HorusMod.Placement;
+using HorusMod.Loadouts;
+using HorusMod.Data;
 
 namespace HorusMod.UI.ContextMenu
 {
@@ -23,6 +25,8 @@ namespace HorusMod.UI.ContextMenu
                 units.AddRange(selection.Units);
 
             bool allowed = HorusPermissions.CanSpawn();
+            bool containsLiveOrdnance = units.Exists(unit => unit != null &&
+                (unit.definition is MissileDefinition || HorusManager.FindCatalogEntry(unit.definition)?.IsLiveOrdnance == true));
             string denied = allowed ? null : "Solo host";
             var items = new List<ContextMenuItem>
             {
@@ -51,7 +55,8 @@ namespace HorusMod.UI.ContextMenu
             });
             items.Add(ContextMenuItem.Sep());
             items.Add(new ContextMenuItem { Label = "Enfocar camara", Shortcut = "F", OnClick = manager.FocusSelection });
-            items.Add(Gated("Duplicar", "Ctrl+D", allowed, denied, manager.DuplicateSelection));
+            items.Add(Gated("Duplicar", "Ctrl+D", allowed && !containsLiveOrdnance,
+                containsLiveOrdnance ? "Municion viva: duplicado no permitido" : denied, manager.DuplicateSelection));
             items.Add(ContextMenuItem.Sep());
             ContextMenuItem delete = Gated("Borrar", "Del", HorusPermissions.CanDelete(), "Solo host", manager.DeleteSelection);
             delete.IsDanger = true;
@@ -77,26 +82,22 @@ namespace HorusMod.UI.ContextMenu
         {
             var result = new List<ContextMenuItem>();
             if (units.Count == 0 || !(units[0] is Aircraft first)) return result;
-            StandardLoadout[] firstPresets = (first.definition as AircraftDefinition)?.aircraftParameters?.StandardLoadouts;
-            if (firstPresets == null || firstPresets.Length == 0) return result;
-
-            int commonPresetCount = firstPresets.Length;
+            AircraftDefinition definition = first.definition as AircraftDefinition;
+            if (definition == null) return result;
             for (int i = 1; i < units.Count; i++)
             {
-                if (!(units[i] is Aircraft aircraft)) return result;
-                StandardLoadout[] presets = (aircraft.definition as AircraftDefinition)?.aircraftParameters?.StandardLoadouts;
-                if (presets == null || presets.Length == 0) return result;
-                commonPresetCount = System.Math.Min(commonPresetCount, presets.Length);
+                if (!(units[i] is Aircraft aircraft) || !ReferenceEquals(aircraft.definition, definition)) return result;
             }
 
-            for (int i = 0; i < commonPresetCount; i++)
+            IReadOnlyList<LoadoutDraft> presets = HorusLoadoutService.GetValidStandardDrafts(definition, first.NetworkHQ);
+            for (int i = 0; i < presets.Count; i++)
             {
-                int index = i;
-                string label = string.IsNullOrEmpty(firstPresets[i]?.Name) ? $"Preset {i + 1}" : firstPresets[i].Name;
+                LoadoutDraft draft = presets[i].Clone();
+                string label = string.IsNullOrEmpty(draft.Name) ? $"Preset {i + 1}" : draft.Name;
                 result.Add(Gated(label, "", allowed, denied, () =>
                 {
                     foreach (Unit unit in units)
-                        HorusUnitEditor.TrySetLoadout((Aircraft)unit, index);
+                        HorusUnitEditor.TrySetLoadout((Aircraft)unit, draft);
                 }));
             }
             return result;
@@ -106,13 +107,15 @@ namespace HorusMod.UI.ContextMenu
         {
             var result = new List<ContextMenuItem>();
             if (units.Count == 0 || !(units[0] is Aircraft first)) return result;
+            AircraftDefinition definition = first.definition as AircraftDefinition;
+            if (definition == null) return result;
             var firstLiveries = (first.definition as AircraftDefinition)?.aircraftParameters?.liveries;
             if (firstLiveries == null || firstLiveries.Count == 0) return result;
 
             int commonLiveryCount = firstLiveries.Count;
             for (int i = 1; i < units.Count; i++)
             {
-                if (!(units[i] is Aircraft aircraft)) return result;
+                if (!(units[i] is Aircraft aircraft) || !ReferenceEquals(aircraft.definition, definition)) return result;
                 var liveries = (aircraft.definition as AircraftDefinition)?.aircraftParameters?.liveries;
                 if (liveries == null || liveries.Count == 0) return result;
                 commonLiveryCount = System.Math.Min(commonLiveryCount, liveries.Count);

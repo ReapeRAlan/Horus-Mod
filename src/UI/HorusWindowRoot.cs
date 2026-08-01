@@ -18,6 +18,7 @@ namespace HorusMod.UI
     public static class HorusWindowRoot
     {
         private static HorusTab activeTab;
+        private static HorusTab? pendingActiveTab;
         private static bool resizing;
         private static bool resizeRequested;
         private static Vector2 requestedSize;
@@ -26,7 +27,11 @@ namespace HorusMod.UI
         private static readonly Vector2[] tabScroll = new Vector2[5];
 
         public static HorusTab ActiveTab => activeTab;
-        public static void ResetActiveTab() => activeTab = HorusTab.Place;
+        public static void ResetActiveTab()
+        {
+            activeTab = HorusTab.Place;
+            pendingActiveTab = null;
+        }
 
         public static void ApplyRequestedSize(ref Rect rect)
         {
@@ -36,6 +41,12 @@ namespace HorusMod.UI
 
         public static void Draw(HorusManager manager, int windowId)
         {
+            if (Event.current.type == EventType.Layout && pendingActiveTab.HasValue)
+            {
+                activeTab = pendingActiveTab.Value;
+                pendingActiveTab = null;
+            }
+
             HorusTheme.BeginSkinScope();
             Rect rect = manager.WindowRect;
             Rect title = new Rect(0f, 0f, rect.width, 30f);
@@ -118,13 +129,13 @@ namespace HorusMod.UI
             DrawTab(rect.x + 2 * width, rect.y, width, HorusTab.Rts, "RTS");
             DrawTab(rect.x + 3 * width, rect.y, width, HorusTab.Settings, "SETTINGS");
             if (count == 5) DrawTab(rect.x + 4 * width, rect.y, width, HorusTab.Debug, "DEBUG");
-            else if (activeTab == HorusTab.Debug) activeTab = HorusTab.Settings;
+            else if (activeTab == HorusTab.Debug) pendingActiveTab = HorusTab.Settings;
         }
 
         private static void DrawTab(float x, float y, float width, HorusTab tab, string label)
         {
             if (GUI.Button(new Rect(x, y, width - 2f, 27f), label, activeTab == tab ? HorusTheme.TabActive : HorusTheme.TabInactive))
-                activeTab = tab;
+                pendingActiveTab = tab;
         }
     }
 }

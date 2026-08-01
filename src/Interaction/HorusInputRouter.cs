@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using HorusMod.Core;
+using HorusMod.Logging;
 using HorusMod.Placement;
 using HorusMod.UI;
 using HorusMod.UI.ContextMenu;
@@ -127,8 +128,11 @@ namespace HorusMod.Interaction
                 if (Input.GetMouseButtonDown(0) && Pick.Valid)
                 {
                     bool repeat = Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift);
+                    LogPickDiagnostics();
                     Unit spawned = owner.PlaceAtWorld(Pick.Point);
-                    if (!repeat)
+                    // Keep placement armed when a validation/confirmation gate rejects
+                    // the click (RTS two-step, live ordnance, lookup-only content, etc.).
+                    if (owner.LastPlacementConsumed && (!repeat || owner.LastPlacementWasLiveOrdnance))
                     {
                         if (spawned != null) selection.Select(spawned, false, false);
                         owner.CancelPlacement();
@@ -189,6 +193,30 @@ namespace HorusMod.Interaction
                 MarqueeActive = false;
             }
         }
+
+        /// <summary>
+        /// One-shot diagnostic for "placement lands somewhere other than the click point":
+        /// dumps exactly what the pick ray found (or didn't) at the moment of the click,
+        /// including whether the water-plane fallback substituted a different point.
+        /// </summary>
+        private void LogPickDiagnostics()
+        {
+            Camera cam = Camera.main;
+            Vector3 mouse = Input.mousePosition;
+            Vector3 camPos = cam != null ? cam.transform.position : Vector3.zero;
+            float distCamToPoint = Vector3.Distance(camPos, Pick.Point);
+            float waterEnter = 0f;
+            bool waterPlaneHit = cam != null && Datum.origin != null &&
+                Datum.WaterPlane().Raycast(cam.ScreenPointToRay(mouse), out waterEnter);
+            HorusLog.Info("Placement",
+                $"Click pick: cam={(cam != null ? cam.name : "null")} camPos={FormatV(camPos)} " +
+                $"mouse={mouse.x:F0},{mouse.y:F0} pickValid={Pick.Valid} pickPoint={FormatV(Pick.Point)} " +
+                $"pickDistance={Pick.Distance:F1} hitCollider={(Pick.Hit.collider != null ? Pick.Hit.collider.name : "none")} " +
+                $"camToPickDistance={distCamToPoint:F1} datumOrigin={(Datum.origin != null ? FormatV(Datum.origin.position) : "null")} " +
+                $"waterPlaneWouldHit={waterPlaneHit} waterEnter={(waterPlaneHit ? waterEnter.ToString("F1") : "n/a")}.");
+        }
+
+        private static string FormatV(Vector3 v) => $"({v.x:F1},{v.y:F1},{v.z:F1})";
 
         private void UpdateRightMouse(bool overGui)
         {
@@ -269,7 +297,7 @@ namespace HorusMod.Interaction
                 {
                     bool repeat = Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift);
                     Unit spawned = owner.PlaceAtMap(mapPosition);
-                    if (!repeat)
+                    if (owner.LastPlacementConsumed && (!repeat || owner.LastPlacementWasLiveOrdnance))
                     {
                         if (spawned != null) selection.Select(spawned, false, false);
                         owner.CancelPlacement();

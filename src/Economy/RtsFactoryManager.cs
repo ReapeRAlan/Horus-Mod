@@ -11,6 +11,8 @@ using HorusMod.Networking;
 using HorusMod.Logging;
 using HorusMod.UI;
 using HorusMod.Interaction;
+using HorusMod.Spawning;
+using HorusMod.Data;
 
 namespace HorusMod.Economy
 {
@@ -97,7 +99,9 @@ namespace HorusMod.Economy
             }
 
             // 0. Auto-recreate virtual factory visual anchors if they are missing
-            if (activeFactories.Any(f => f != null && f.isVirtual && f.anchorUnit == null && !f.anchorDestroyed))
+            float retryNow = Time.unscaledTime;
+            if (activeFactories.Any(f => f != null && f.isVirtual && f.anchorUnit == null &&
+                !f.anchorDestroyed && retryNow >= f.nextAnchorRetryTime))
             {
                 RecreateVirtualFactoryAnchors();
             }
@@ -374,6 +378,7 @@ namespace HorusMod.Economy
             {
                 if (factory == null || !factory.isVirtual) continue;
                 if (factory.anchorDestroyed) continue;
+                if (Time.unscaledTime < factory.nextAnchorRetryTime) continue;
 
                 // If anchorUnit is already set and alive, skip
                 if (factory.anchorUnit != null && !IsDeadUnit(factory.anchorUnit)) continue;
@@ -400,7 +405,18 @@ namespace HorusMod.Economy
                     factory.anchorUnit = spawned;
                     factory.anchorUnitName = spawned.unitName;
                     factory.anchorDestroyed = false;
+                    factory.anchorSpawnFailures = 0;
+                    factory.nextAnchorRetryTime = 0f;
+                    factory.lastStatus = "Ready";
                     HorusLog.Info("Factory", $"[HORUS RTS] Recreated visual building '{spawned.unitName}' for factory '{factory.displayName}' id={factory.id}");
+                }
+                else
+                {
+                    factory.anchorSpawnFailures++;
+                    float delay = Mathf.Min(60f, 5f * Mathf.Pow(2f, Mathf.Min(4, factory.anchorSpawnFailures - 1)));
+                    factory.nextAnchorRetryTime = Time.unscaledTime + delay;
+                    factory.lastStatus = $"Visual spawn failed; retry in {delay:F0}s";
+                    LogBlocked(factory, "anchor-retry", $"[HORUS RTS] Factory visual retry delayed {delay:F0}s: {factory.displayName}");
                 }
             }
         }
@@ -511,7 +527,22 @@ namespace HorusMod.Economy
 
             string uniqueName = (buildingDef.jsonKey ?? "building") + "_" + Guid.NewGuid().ToString("N").Substring(0, 8);
             Quaternion rot = Quaternion.Euler(0f, yaw, 0f);
-            Unit spawned = Spawner.i.SpawnFromUnitDefinitionInEditor(buildingDef, globalPos, rot, hq, uniqueName);
+            var request = new HorusSpawnRequest
+            {
+                Definition = buildingDef,
+                Position = globalPos,
+                Rotation = rot,
+                HQ = hq,
+                UniqueName = uniqueName
+            };
+            string authorizationError = "Horus manager unavailable.";
+            if (HorusManager.Instance == null ||
+                !HorusManager.Instance.TryAuthorizeSpawnRequest(request, false, out authorizationError))
+            {
+                HorusLog.Warning("Factory", $"[HORUS RTS] Factory visual blocked: {authorizationError}");
+                return null;
+            }
+            Unit spawned = HorusSpawnService.Spawn(request).Unit;
             if (spawned == null)
             {
                 HorusLog.Error("Factory", $"[HORUS RTS] Factory visual spawn failed: {buildingDef.unitName} for factory id={factory.id}");
@@ -542,23 +573,33 @@ namespace HorusMod.Economy
                 LogBlocked(factory, "production-unit-incompatible-" + unitKey, $"[HORUS RTS] Factory production blocked: '{def.unitName}' is incompatible with {factory.factoryType}");
             }
 
-            UnitDefinition fallback = FindFirstCompatibleDefinition(factory.factoryType);
-            if (fallback != null)
-            {
-                LogBlocked(factory, "production-unit-fallback-" + unitKey, $"[HORUS RTS] Factory production fallback: {unitKey} -> {fallback.unitName}");
-            }
-            return fallback;
+            // Never silently substitute a different combat unit. Legacy unitName
+            // values are already resolved above; a missing/incompatible key must be
+            // corrected explicitly by the user.
+            return null;
         }
 
         private bool IsDefinitionCompatibleWithFactory(RtsFactory factory, UnitDefinition def)
         {
             if (factory == null || def == null) return false;
+            // Live ordnance is intentionally individual-only. Never let a fallback,
+            // Mixed factory or persisted queue turn missiles into repeating production.
+            CatalogEntry catalogEntry = HorusManager.FindCatalogEntry(def);
+            if (catalogEntry?.IsLiveOrdnance == true || def is MissileDefinition) return false;
             if (factory.factoryType == RtsFactoryType.MixedProduction) return true;
             if (factory.factoryType == RtsFactoryType.Economy) return false;
 
-            bool isShip = HorusManager.Instance.IsShipDefinition(def) || def is ShipDefinition;
-            bool isAircraft = def is AircraftDefinition;
-            bool isGround = def is VehicleDefinition || def is BuildingDefinition || def is SceneryDefinition;
+            bool isShip = catalogEntry != null
+                ? catalogEntry.SpawnKind == SpawnKind.Ship
+                : def is ShipDefinition || def.unitPrefab?.GetComponent<Ship>() != null;
+            bool isAircraft = catalogEntry != null
+                ? catalogEntry.SpawnKind == SpawnKind.Aircraft
+                : def is AircraftDefinition || def.unitPrefab?.GetComponent<Aircraft>() != null;
+            bool isGround = catalogEntry != null
+                ? catalogEntry.SpawnKind == SpawnKind.Vehicle ||
+                  catalogEntry.SpawnKind == SpawnKind.Building ||
+                  catalogEntry.SpawnKind == SpawnKind.Scenery
+                : def is VehicleDefinition || def is BuildingDefinition || def is SceneryDefinition;
 
             switch (factory.factoryType)
             {
@@ -629,7 +670,7 @@ namespace HorusMod.Economy
             if (source == null) return null;
             foreach (var item in source)
             {
-                if (item is UnitDefinition def && !string.IsNullOrEmpty(def.unitName) && def.unitName != "???")
+                if (item is UnitDefinition def)
                 {
                     return def;
                 }
@@ -645,8 +686,8 @@ namespace HorusMod.Economy
                 if (string.IsNullOrEmpty(term)) continue;
                 foreach (var item in source)
                 {
-                    if (!(item is UnitDefinition def) || string.IsNullOrEmpty(def.unitName) || def.unitName == "???") continue;
-                    if (def.unitName.IndexOf(term, StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    if (!(item is UnitDefinition def)) continue;
+                    if ((!string.IsNullOrEmpty(def.unitName) && def.unitName.IndexOf(term, StringComparison.OrdinalIgnoreCase) >= 0) ||
                         (!string.IsNullOrEmpty(def.jsonKey) && def.jsonKey.IndexOf(term, StringComparison.OrdinalIgnoreCase) >= 0))
                     {
                         return def;
@@ -681,8 +722,13 @@ namespace HorusMod.Economy
             Vector3 forward = Quaternion.Euler(0f, factory.yaw, 0f) * Vector3.forward;
             Vector3 right = Quaternion.Euler(0f, factory.yaw, 0f) * Vector3.right;
 
-            bool isShip = HorusManager.Instance.IsShipDefinition(def) || def is ShipDefinition;
-            bool isAircraft = def is AircraftDefinition;
+            CatalogEntry catalogEntry = HorusManager.FindCatalogEntry(def);
+            bool isShip = catalogEntry != null
+                ? catalogEntry.SpawnKind == SpawnKind.Ship
+                : def is ShipDefinition || def.unitPrefab?.GetComponent<Ship>() != null;
+            bool isAircraft = catalogEntry != null
+                ? catalogEntry.SpawnKind == SpawnKind.Aircraft
+                : def is AircraftDefinition || def.unitPrefab?.GetComponent<Aircraft>() != null;
             Unit spawned = null;
 
             if (isShip)
@@ -706,19 +752,70 @@ namespace HorusMod.Economy
                 GlobalPosition globalPos = airPos.ToGlobalPosition();
                 string uniqueName = (def.jsonKey ?? "aircraft") + "_" + Guid.NewGuid().ToString("N").Substring(0, 8);
                 LogFactorySpawnPoint(factory, def, airPos, "airborne", spawnYaw);
-                spawned = Spawner.i.SpawnFromUnitDefinitionInEditor(def, globalPos, spawnRot, hq, uniqueName);
+                Aircraft prefabAircraft = def.unitPrefab != null ? def.unitPrefab.GetComponent<Aircraft>() : null;
+                AircraftDefinition effectiveAircraftDefinition = def as AircraftDefinition ??
+                    prefabAircraft?.definition as AircraftDefinition;
+                float defaultFuel = effectiveAircraftDefinition?.aircraftParameters != null
+                    ? Mathf.Clamp01(effectiveAircraftDefinition.aircraftParameters.DefaultFuelLevel)
+                    : 1f;
+                var request = new HorusSpawnRequest
+                {
+                    Definition = def,
+                    Position = globalPos,
+                    Rotation = spawnRot,
+                    HQ = hq,
+                    UniqueName = uniqueName,
+                    Aircraft = new AircraftSpawnOptions
+                    {
+                        // The authoritative spawn service resolves and validates a
+                        // fresh default (or a dimensioned empty fallback) before the
+                        // native network spawn.
+                        Loadout = null,
+                        FuelRatio = defaultFuel,
+                        Skill = 1f,
+                        Bravery = 0.5f
+                    }
+                };
+                if (!HorusManager.Instance.TryAuthorizeSpawnRequest(request, false, out string authorizationError))
+                {
+                    factory.lastStatus = "Production blocked: " + authorizationError;
+                    return null;
+                }
+                HorusSpawnResult result = HorusSpawnService.Spawn(request);
+                spawned = result.Unit;
+                if (!result.Success) factory.lastStatus = "Production failed: " + result.Message;
                 if (spawned != null) HorusManager.Instance.AddHorusSpawnedUnit(spawned);
             }
             else
             {
-                Vector3 finalPos = GetFactoryGroundSpawnPosition(factory, def, factoryLocalPos, forward, right);
+                Vector3 groundCandidate = GetFactoryGroundSpawnPosition(factory, def, factoryLocalPos, forward, right);
+                Vector3 finalPos = groundCandidate;
+                if (catalogEntry?.PlacementSurface == PlacementSurface.Sea)
+                    finalPos.y = Datum.LocalSeaY + def.spawnOffset.y;
                 GlobalPosition globalPos = finalPos.ToGlobalPosition();
                 string uniqueName = (def.jsonKey ?? "unit") + "_" + Guid.NewGuid().ToString("N").Substring(0, 8);
                 LogFactorySpawnPoint(factory, def, finalPos, "front-ground", spawnYaw);
-                spawned = Spawner.i.SpawnFromUnitDefinitionInEditor(def, globalPos, spawnRot, hq, uniqueName);
+                var request = new HorusSpawnRequest
+                {
+                    Definition = def,
+                    Position = globalPos,
+                    Rotation = spawnRot,
+                    HQ = hq,
+                    UniqueName = uniqueName,
+                    Stationary = factory.factoryType == RtsFactoryType.DefenseProduction
+                };
+                if (!HorusManager.Instance.TryAuthorizeSpawnRequest(request, false, out string authorizationError))
+                {
+                    factory.lastStatus = "Production blocked: " + authorizationError;
+                    return null;
+                }
+                HorusSpawnResult result = HorusSpawnService.Spawn(request);
+                spawned = result.Unit;
+                if (!result.Success) factory.lastStatus = "Production failed: " + result.Message;
                 if (spawned != null)
                 {
-                    CorrectFactoryGroundSpawn(spawned, finalPos, spawnRot);
+                    if (catalogEntry == null || catalogEntry.PlacementSurface == PlacementSurface.Ground)
+                        CorrectFactoryGroundSpawn(spawned, finalPos, spawnRot);
                     HorusManager.Instance.AddHorusSpawnedUnit(spawned);
                     if (factory.factoryType == RtsFactoryType.DefenseProduction)
                     {
@@ -1120,7 +1217,12 @@ namespace HorusMod.Economy
                 if (!string.IsNullOrEmpty(visualBuildingName))
                 {
                     Unit spawned = SpawnFactoryVisual(factory, visualBuildingName, globalPos, yaw, hq, "create");
-                    if (spawned != null)
+                    if (spawned == null)
+                    {
+                        ReportFactoryRejected("Factory visual could not be spawned; the factory was not registered");
+                        return null;
+                    }
+                    else
                     {
                         factory.anchorUnit = spawned;
                         factory.anchorUnitName = spawned.unitName;
@@ -1284,9 +1386,32 @@ namespace HorusMod.Economy
         public void AddUnitToProductionQueue(RtsFactory factory, UnitDefinition unitDefinition)
         {
             if (!CanMutateFactories("add unit to production queue")) return;
+            CatalogEntry entry = HorusManager.FindCatalogEntry(unitDefinition);
+            if (entry?.IsLiveOrdnance == true || unitDefinition is MissileDefinition)
+            {
+                HorusToasts.Show("Live ordnance cannot be added to factory queues");
+                HorusLog.Warning("Factory", "Blocked live ordnance from a production queue.");
+                return;
+            }
             if (factory == null || unitDefinition == null) return;
+            if (!IsDefinitionCompatibleWithFactory(factory, unitDefinition))
+            {
+                HorusToasts.Show($"{unitDefinition.unitName} is incompatible with {factory.factoryType}");
+                return;
+            }
+            var probe = new HorusSpawnRequest { Definition = unitDefinition };
+            string authorizationError = "Horus manager unavailable.";
+            if (HorusManager.Instance == null ||
+                !HorusManager.Instance.TryAuthorizeSpawnRequest(probe, false, out authorizationError))
+            {
+                HorusToasts.Show("Factory queue blocked: " + authorizationError);
+                return;
+            }
             if (factory.productionUnitKeys == null) factory.productionUnitKeys = new List<string>();
-            factory.productionUnitKeys.Add(unitDefinition.unitName);
+            string stableKey = entry?.Key;
+            if (string.IsNullOrWhiteSpace(stableKey)) stableKey = unitDefinition.jsonKey;
+            if (string.IsNullOrWhiteSpace(stableKey)) stableKey = unitDefinition.unitName;
+            factory.productionUnitKeys.Add(stableKey);
             HorusLog.Info("Factory", $"[HORUS RTS] Factory queue add: {factory.displayName} + {unitDefinition.unitName}");
             SaveInstancesInternal();
         }
