@@ -3,7 +3,7 @@
 A Game Master/Free Camera utility mod for Nuclear Option (formerly known as Zeus Mod). Horus allows the host or local player to spawn aircraft, vehicles, ships, and buildings in real time.
 
 > [!NOTE]
-> The v1.3.0 capabilities documented below are published as of this release. Lookup-only content, live ordnance, mod-provided definitions, and naval resupply remain experimental until they pass further in-game validation.
+> The v1.4.3 capabilities documented below are published as of this release. Lookup-only content, live ordnance, mod-provided definitions, naval resupply, and corrected AI bombing remain experimental until they pass further in-game validation.
 
 ## Features
 - Toggle Horus Mode (Free Camera + UI) with **F9**.
@@ -11,13 +11,16 @@ A Game Master/Free Camera utility mod for Nuclear Option (formerly known as Zeus
 - Search and filter the native unit catalog by category, role, favorites, and recent use.
 - Spawn selected units at the mouse cursor with **Left Click**.
 - Select units with **Left Click**, add with **Shift + Left Click**, or drag a selection box.
-- Issue formation-aware move orders with a quick **Right Click**; hold/drag right mouse to rotate the camera.
+- Issue formation-aware move orders with a quick **Right Click**; drag right mouse at least 10 pixels to rotate the camera. A stationary hold remains a click.
 - Open a contextual unit menu with **Right Click on a unit** (or **Alt + Right Click** anywhere) for orders, loadouts, skins/liveries, skill, duplication, focus, and deletion.
 - Customize aircraft for the next spawn or after selection with independent state, native standard presets, named Horus presets, session loadouts, and per-hardpoint weapon choices.
 - Save aircraft-specific Horus loadout presets in `BepInEx/config/HorusMod/aircraft_loadouts.json` using stable definition keys.
 - Browse aircraft, vehicles, ships, buildings, scenery, containers/other units, and experimental live ordnance; refresh the catalog when another mod registers content late.
 - Inspect logistics capabilities such as ammunition rearming, naval resupply, refueling, storage, and warhead storage without treating decorative props as functional supply objects.
 - Move ground units, ships, and host-controlled AI aircraft in formations; aircraft orders use their native server autopilot and never override a player-controlled aircraft.
+- Issue Attack Target, Attack-Move, multi-waypoint Patrol, and Guard/Escort orders to compatible AI. Target orders only use contacts already known to the unit's native faction HQ.
+- Set per-unit **Weapons Free** or **Hold Fire** rules from the contextual menu. Hold Fire does not disable evasion or countermeasures and never affects player-controlled aircraft.
+- Correct conventional AI bomb release for moving targets and weapon rail/ejection delay with skill-dependent dispersion; set `AI.ImproveAIBombingAccuracy=false` to restore fully native release behavior.
 - **Safe middle-click delete**: only removes units spawned by Horus (terrain, roads, buildings and original map objects are protected).
 - **Ghost preview**: see a semi-transparent preview of the selected unit at the placement position before spawning.
 - **Object yaw rotation before spawning** (slider, presets, and `Alt + Scroll`).
@@ -55,10 +58,15 @@ A Game Master/Free Camera utility mod for Nuclear Option (formerly known as Zeus
 - **Shift + Left Click**: Add to selection, or repeat placement without leaving Place mode
 - **Left-drag**: Box-select units
 - **Middle Click**: Delete a unit spawned by Horus (safe delete — map/environment is protected)
-- **Right Click on world**: Move the current selection at the mouse cursor
-- **Right Click on unit**: Open that unit's context menu
-- **Alt + Right Click**: Force the context menu anywhere
-- **Right Click (Hold/Drag)**: Rotate Camera (6px / 250ms click disambiguation)
+- **Right Click on terrain**: Move the current selection to the mouse cursor
+- **Right Click on selected/neutral unit**: Open the visual unit command menu
+- **Right Click on a known enemy while units are selected**: Attack Target
+- **Right Click on a friendly while units are selected**: Guard/Escort
+- **Alt + Right Click on terrain**: Open Move, Attack-Move, and Patrol options
+- **Right Click (Drag)**: Rotate Camera (10px movement threshold; holding still remains a click)
+- **Patrol planning**: LMB add point / Backspace undo / Enter confirm / Esc cancel
+- **Manage > Tactical Orders**: Open the same visual menu or issue Hold, Clear Orders, Weapons Free, and Hold Fire directly
+- **Group target orders**: After selecting several units, choose Move, Attack-Move, Patrol, Attack Target, or Guard/Escort from the unit menu or **Manage > Tactical Orders**, then LMB one destination/target to command the entire selection; RMB or Esc cancels.
 - **F / H / Delete / Esc**: Focus / hold / delete / cancel
 - **Ctrl+D / Ctrl+A / Ctrl+Z / Ctrl+Y**: Duplicate / select all Horus units / undo / redo
 - **Ctrl+1–9 / 1–9**: Assign / recall control groups
@@ -120,7 +128,15 @@ Catalog filters include **Logistics**, **Ammo**, **Naval Resupply**, **Fuel**, a
 
 #### Live Ordnance
 
-Native `MissileDefinition` entries appear as **Live Ordnance**. They can be placed only as individual spawns and are excluded from groups, repeat placement, RTS/factory queues, and saved group presets. Every missile requires an explicit confirmation; nuclear or strategic ordnance requires a second confirmation. This remains experimental, especially for lookup-only definitions and multiplayer.
+Native `MissileDefinition` entries appear as **Live Ordnance**. They can be placed only as individual Sandbox spawns and are excluded from groups, repeat placement, RTS/factory queues, saved group presets, duplication, and undo/redo. This remains experimental, especially for lookup-only definitions and multiplayer.
+
+Choose one explicit target mode in the Live Ordnance panel:
+
+- **World Point**: the weapon spawns above the clicked point and travels straight down.
+- **Track Selected**: first select exactly one active unit, choose a missile with a native seeker, then left-click the desired launch point. Horus aims with motion lead and the native seeker continues following the unit.
+- **Impact Selected**: first select exactly one active unit, choose the target-relative height, then left-click anywhere to confirm. Horus spawns above the predicted unit position. Guided weapons may keep tracking; bombs and rockets without a seeker receive initial motion lead but remain ballistic.
+
+Horus does not parent live weapons to units or force an explosion inside their collider. Native physics, collision, fuze/arming, network behavior, and damage remain in control of the game.
 
 ### Groups & Formations
 Open the **Groups & Formations** section in the Horus window to control group spawning:
@@ -188,7 +204,7 @@ If you do have Horus installed, the UI shows your current mode:
 - **Multiplayer Host** — full access.
 - **Client (View Only)** — spawning, deleting, and budget adjustments are blocked by default.
 
-Dedicated/headless command transport is intentionally out of scope for v1.3.0. Horus currently supports single player and local-host authority only; installing the current DLL on a dedicated server does not provide a remote Game Master interface. The planned server design uses a headless-safe runtime, authenticated SteamID allowlist, versioned Mirage messages, rate limits, deduplication, server-side validation, and audit logs. Nuclear Option's loopback server-command TCP endpoint will not be reused as an unauthenticated gameplay-control channel. See [ROADMAP.md](ROADMAP.md) for the staged design.
+Dedicated/headless command transport is intentionally out of scope for v1.4.3. Horus currently supports single player and local-host authority only; installing the current DLL on a dedicated server does not provide a remote Game Master interface. The planned server design uses a headless-safe runtime, authenticated SteamID allowlist, versioned Mirage messages, rate limits, deduplication, server-side validation, and audit logs. Nuclear Option's loopback server-command TCP endpoint will not be reused as an unauthenticated gameplay-control channel. See [ROADMAP.md](ROADMAP.md) for the staged design.
 
 ### Map Spawn Mode
 1. Enable **Map Spawn: ON** in the Horus window (this also opens the map).
@@ -205,7 +221,7 @@ Dedicated/headless command transport is intentionally out of scope for v1.3.0. H
 - **"My aircraft has no standard loadouts"**: Try **Custom Hardpoints**. Some aircraft, especially mod aircraft, expose compatible hardpoint sets but no `StandardLoadouts`; others have fixed or incomplete weapon data and cannot be edited safely.
 - **"A mod aircraft or `???` is missing"**: Click **Refresh Catalog**. If it appears only as `Lookup Only`, spawning requires **Force incompatible content** and its per-session warning; this does not guarantee multiplayer compatibility.
 - **"The naval supply object does not rearm my ship"**: Check `Can resupply ships`. `unknown` means the prefab has not been functionally verified, while `no` means no naval `Rearmer` capability was detected. Storage or decorative containers do not automatically supply ammunition.
-- **"Can Horus control a dedicated server?"**: Not yet. v1.3.0 has no supported headless admin transport; use Horus only in single player or as the local multiplayer host.
+- **"Can Horus control a dedicated server?"**: Not yet. v1.4.3 has no supported headless admin transport; use Horus only in single player or as the local multiplayer host.
 
 ## Compatibility
 Compatible with NOMM/NOMNOM mod managers.

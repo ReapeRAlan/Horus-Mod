@@ -5,6 +5,7 @@ using BepInEx.Logging;
 using HorusMod.Logging;
 using HorusMod.Data;
 using HorusMod.Compat;
+using HorusMod.Interaction;
 using UnityEngine;
 
 namespace HorusMod
@@ -14,7 +15,7 @@ namespace HorusMod
     {
         public const string PluginGuid = "com.reaperalan.horusmod";
         public const string PluginName = "Horus Mod Starter";
-        public const string PluginVersion = "1.3.0";
+        public const string PluginVersion = "1.4.3";
 
         public static new ManualLogSource Logger { get; private set; }
         public static ConfigEntry<KeyCode> HotkeyToggleMode { get; private set; }
@@ -55,6 +56,7 @@ namespace HorusMod
 
         public static ConfigEntry<HorusLogLevel> LogVerbosity { get; private set; }
         public static ConfigEntry<bool> ShowDebugTab { get; private set; }
+        public static ConfigEntry<bool> ImproveAIBombingAccuracy { get; private set; }
 
         private void Awake()
         {
@@ -114,6 +116,8 @@ namespace HorusMod
             BaseDeploymentRadius = Config.Bind("RTS", "BaseDeploymentRadius", 3000f, "Radius in meters for strict base deployment restriction.");
             LogVerbosity = Config.Bind("Diagnostics", "LogVerbosity", HorusLogLevel.Normal, "Quiet, Normal, Verbose, or Trace.");
             ShowDebugTab = Config.Bind("Diagnostics", "ShowDebugTab", false, "Show the Debug tab and self-test diagnostics.");
+            ImproveAIBombingAccuracy = Config.Bind("AI", "ImproveAIBombingAccuracy", true,
+                "Correct conventional AI bomb release for target motion and weapon rail/ejection delay. Fails open to native behavior if game signatures change.");
             HorusPrefs.Bind(Config);
             GameApi.Initialize();
 
@@ -170,13 +174,13 @@ namespace HorusMod
                 // ARHSeeker.SlowChecks and OpticalSeekerCruiseMissile.SlowChecks/PreTerminalMode
                 // each treat "no target" as a self-destruct or divert-to-cruise-altitude trigger.
                 // Native gameplay never exercises that path -- a human/AI pilot always fires these
-                // at something -- but Horus's Live Ordnance spawns with target=null by default (see
-                // HorusManager.missileGuideToSelectedTarget), so every shot using one of these
+                // at something -- but Horus's World Point Live Ordnance mode spawns with
+                // target=null by default, so every shot using one of these
                 // seekers was guaranteed to self-destruct within 2-10s wherever it happened to be,
                 // or (for the cruise missile) climb toward cruise altitude and detonate mid-air 2km
                 // short, instead of continuing the straight-down drop onto the clicked point.
                 // These patches only change behavior when the seeker has no target; a real target
-                // (from the "Guide toward selected unit" toggle) runs the native logic unmodified.
+                // (from Track Selected / compatible Impact Selected) runs native logic unmodified.
                 var harmony = new HarmonyLib.Harmony(PluginGuid);
                 PatchSeekerNoTarget(harmony, typeof(ARHSeeker), "SlowChecks",
                     nameof(SeekerNoTargetPatches.ARHSeeker_SlowChecks_Prefix));
@@ -188,6 +192,25 @@ namespace HorusMod
             catch (Exception ex)
             {
                 HorusLog.Error("Bootstrap", $"{PluginName}: Failed to apply seeker no-target patches. Exception: {ex.Message}");
+            }
+
+            try
+            {
+                var harmony = new HarmonyLib.Harmony(PluginGuid);
+                HorusTacticalHarmonyPatches.Apply(harmony);
+            }
+            catch (Exception ex)
+            {
+                HorusLog.Error("Bootstrap", $"{PluginName}: Tactical patches failed open. Exception: {ex.Message}");
+            }
+            try
+            {
+                var harmony = new HarmonyLib.Harmony(PluginGuid);
+                HorusBombingCorrection.Apply(harmony);
+            }
+            catch (Exception ex)
+            {
+                HorusLog.Error("Bootstrap", $"{PluginName}: AI bombing patch failed open. Exception: {ex.Message}");
             }
 
             var go = new GameObject("HorusModManager");

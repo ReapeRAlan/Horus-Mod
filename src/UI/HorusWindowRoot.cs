@@ -77,7 +77,13 @@ namespace HorusMod.UI
             Rect status = new Rect(0f, rect.height - 25f, rect.width, 25f);
             GUI.Box(status, GUIContent.none, HorusTheme.StatusBar);
             string permission = HorusPermissions.IsMultiplayerClient() ? "View Only" : "Host";
-            string tool = manager.InputRouter != null ? manager.InputRouter.Tool.ToString().ToUpperInvariant() : "SELECT";
+            string tool = manager.InputRouter == null
+                ? "SELECT"
+                : manager.InputRouter.GroupOrderTargetMode != HorusMod.Interaction.HorusGroupOrderTargetMode.None
+                    ? "TARGET " + manager.InputRouter.GroupOrderTargetMode.ToString().ToUpperInvariant()
+                    : manager.InputRouter.PatrolPlanning
+                        ? "PATROL"
+                        : manager.InputRouter.Tool.ToString().ToUpperInvariant();
             int selection = manager.WorldSelection != null ? manager.WorldSelection.Count : 0;
             string toast = HorusToasts.Current;
             string statusText = string.IsNullOrEmpty(toast)

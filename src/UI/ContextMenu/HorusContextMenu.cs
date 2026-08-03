@@ -8,7 +8,9 @@ namespace HorusMod.UI.ContextMenu
         private sealed class MenuLevel
         {
             public List<ContextMenuItem> Items;
+            public Vector2 Anchor;
             public Rect Rect;
+            public bool LayoutPending;
             public int HoverIndex = -1;
             public float HoverStart;
         }
@@ -24,8 +26,11 @@ namespace HorusMod.UI.ContextMenu
         {
             Close();
             if (items == null || items.Count == 0) return;
-            HorusTheme.EnsureBuilt();
-            levels.Add(CreateLevel(guiPosition, items));
+            // Open is called by HorusInputRouter.Update. GUI.skin and the other
+            // IMGUI APIs are illegal outside OnGUI, so defer exact measurement
+            // until Draw. The provisional rectangle is also used for pointer
+            // ownership between Update and the next OnGUI pass.
+            levels.Add(CreatePendingLevel(guiPosition, items));
         }
 
         public static void Close() => levels.Clear();
@@ -40,6 +45,8 @@ namespace HorusMod.UI.ContextMenu
         public static void Draw()
         {
             if (!IsOpen) return;
+            HorusTheme.EnsureBuilt();
+            if (!HorusTheme.Built) return;
             int previousDepth = GUI.depth;
             GUI.depth = -1000;
             try
@@ -57,6 +64,7 @@ namespace HorusMod.UI.ContextMenu
             for (int levelIndex = 0; levelIndex < levels.Count; levelIndex++)
             {
                 MenuLevel level = levels[levelIndex];
+                EnsureLayout(level);
                 GUI.Box(level.Rect, GUIContent.none, HorusTheme.MenuPanel);
                 float y = level.Rect.y + 4f;
                 for (int itemIndex = 0; itemIndex < level.Items.Count; itemIndex++)
@@ -98,7 +106,7 @@ namespace HorusMod.UI.ContextMenu
                         {
                             while (levels.Count > levelIndex + 1) levels.RemoveAt(levels.Count - 1);
                             if (levels.Count == levelIndex + 1)
-                                levels.Add(CreateLevel(new Vector2(level.Rect.xMax - 4f, row.y), item.Submenu));
+                                levels.Add(CreatePendingLevel(new Vector2(level.Rect.xMax - 4f, row.y), item.Submenu));
                         }
                         else if (item.Submenu == null && levels.Count > levelIndex + 1)
                         {
@@ -132,23 +140,49 @@ namespace HorusMod.UI.ContextMenu
             }
         }
 
-        private static MenuLevel CreateLevel(Vector2 position, List<ContextMenuItem> items)
+        private static MenuLevel CreatePendingLevel(Vector2 position, List<ContextMenuItem> items)
         {
-            float width = 170f;
+            // Pure estimate: this method is intentionally safe from Update.
+            // Exact GUIStyle measurement happens only from Draw/OnGUI.
+            int longestCharacters = 0;
             float height = 8f;
             foreach (ContextMenuItem item in items)
             {
                 height += item.IsSeparator ? SeparatorHeight : RowHeight;
                 if (!item.IsSeparator)
-                {
-                    measurement.text = item.Label ?? "";
-                    float labelWidth = HorusTheme.MenuItem.CalcSize(measurement).x;
-                    measurement.text = item.Shortcut ?? "";
-                    float candidate = labelWidth + HorusTheme.MenuShortcut.CalcSize(measurement).x + 42f;
-                    width = Mathf.Max(width, candidate);
-                }
+                    longestCharacters = Mathf.Max(longestCharacters,
+                        (item.Label?.Length ?? 0) + (item.Shortcut?.Length ?? 0) + 5);
+            }
+            float width = Mathf.Clamp(longestCharacters * 7f, 170f, 340f);
+            return new MenuLevel
+            {
+                Items = items,
+                Anchor = position,
+                Rect = ClampToScreen(position, width, height),
+                LayoutPending = true
+            };
+        }
+
+        private static void EnsureLayout(MenuLevel level)
+        {
+            if (!level.LayoutPending) return;
+            float width = 170f;
+            foreach (ContextMenuItem item in level.Items)
+            {
+                if (item.IsSeparator) continue;
+                measurement.text = item.Label ?? "";
+                float labelWidth = HorusTheme.MenuItem.CalcSize(measurement).x;
+                measurement.text = item.Shortcut ?? "";
+                float candidate = labelWidth + HorusTheme.MenuShortcut.CalcSize(measurement).x + 42f;
+                width = Mathf.Max(width, candidate);
             }
             width = Mathf.Clamp(width, 170f, 340f);
+            level.Rect = ClampToScreen(level.Anchor, width, level.Rect.height);
+            level.LayoutPending = false;
+        }
+
+        private static Rect ClampToScreen(Vector2 position, float width, float height)
+        {
             float scale = HorusPlugin.UIScale != null ? Mathf.Max(0.1f, HorusPlugin.UIScale.Value) : 1f;
             float screenWidth = Screen.width / scale;
             float screenHeight = Screen.height / scale;
@@ -156,7 +190,7 @@ namespace HorusMod.UI.ContextMenu
             if (position.y + height > screenHeight) position.y -= height;
             position.x = Mathf.Clamp(position.x, 0f, Mathf.Max(0f, screenWidth - width));
             position.y = Mathf.Clamp(position.y, 0f, Mathf.Max(0f, screenHeight - height));
-            return new MenuLevel { Items = items, Rect = new Rect(position.x, position.y, width, height) };
+            return new Rect(position.x, position.y, width, height);
         }
     }
 }

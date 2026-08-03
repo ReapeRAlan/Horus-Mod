@@ -58,8 +58,8 @@ namespace HorusMod.Spawning
         public float Skill = 1f;
         public AircraftSpawnOptions Aircraft;
 
-        // Missiles spawn with a launch velocity so the operator can aim them: the
-        // placement facing sets the direction, elevation lofts it, speed sets the impulse.
+        // Missiles spawn with a launch velocity so the operator can aim them. HorusManager
+        // resolves the final pose for world-point, native tracking, or target-relative impact.
         public float MissileLaunchSpeed = 250f;
         public float MissileLaunchElevation;
 

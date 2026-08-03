@@ -19,23 +19,33 @@ namespace HorusMod.Interaction
 
         private sealed class HorusAircraftMoveState : PilotBaseState
         {
-            private readonly PilotBaseState previousState;
+            private PilotBaseState previousState;
             private GlobalPosition commandedDestination;
             private float cruiseHeight;
+            private readonly bool persistentHold;
 
             public GlobalPosition CommandedDestination => commandedDestination;
+            public bool Completed { get; private set; }
+            public bool PersistentHold => persistentHold;
 
-            public HorusAircraftMoveState(Pilot pilot, PilotBaseState previousState, GlobalPosition target)
+            public HorusAircraftMoveState(Pilot pilot, PilotBaseState previousState, GlobalPosition target, bool persistentHold)
             {
                 this.previousState = previousState;
+                this.persistentHold = persistentHold;
                 commandedDestination = target;
                 Initialize(pilot);
-                stateDisplayName = "Horus move";
+                stateDisplayName = persistentHold ? "Horus hold" : "Horus move";
             }
 
             public void SetDestination(GlobalPosition target)
             {
                 commandedDestination = target;
+                Completed = false;
+            }
+
+            public void SetPreviousState(PilotBaseState state)
+            {
+                if (state != null && state != this) previousState = state;
             }
 
             public override void EnterState(Pilot value)
@@ -66,6 +76,20 @@ namespace HorusMod.Interaction
                 Vector3 delta = commandedDestination - aircraft.GlobalPosition();
                 Vector3 horizontal = new Vector3(delta.x, 0f, delta.z);
                 Vector3 aimDirection = horizontal.sqrMagnitude > 1f ? horizontal.normalized : aircraft.transform.forward;
+
+                if (!persistentHold)
+                {
+                    float arrivalRadius = aircraft.autopilot is AutopilotPlane
+                        ? Mathf.Max(350f, aircraft.speed * 1.5f)
+                        : Mathf.Max(90f, aircraft.definition != null ? aircraft.definition.length * 3f : 90f);
+                    if (horizontal.magnitude <= arrivalRadius)
+                    {
+                        Completed = true;
+                        if (value != null && value.currentState == this && previousState != null)
+                            value.SwitchState(previousState);
+                        return;
+                    }
+                }
 
                 if (aircraft.autopilot is AutopilotPlane)
                 {
@@ -115,7 +139,7 @@ namespace HorusMod.Interaction
                 return false;
             }
             if (aircraft.autopilot == null || aircraft.pilots == null || aircraft.pilots.Length == 0 ||
-                aircraft.pilots[0] == null || aircraft.pilots[0].dead)
+                aircraft.pilots[0] == null || aircraft.pilots[0].dead || aircraft.pilots[0].currentState == null)
             {
                 reason = "aircraft autopilot is not ready";
                 return false;
@@ -131,23 +155,38 @@ namespace HorusMod.Interaction
 
         public static bool TrySetDestination(Aircraft aircraft, GlobalPosition destination, out string reason)
         {
+            return TrySetDestination(aircraft, destination, persistentHold: false, out reason);
+        }
+
+        private static bool TrySetDestination(Aircraft aircraft, GlobalPosition destination, bool persistentHold, out string reason)
+        {
             Cleanup();
             if (!CanCommand(aircraft, out reason)) return false;
 
             Pilot pilot = aircraft.pilots[0];
             if (active.TryGetValue(aircraft, out ActiveCommand command))
             {
-                command.MoveState.SetDestination(destination);
-                if (pilot.currentState != command.MoveState)
+                if (command.MoveState.Completed || command.MoveState.PersistentHold != persistentHold)
                 {
-                    command.PreviousState = pilot.currentState;
-                    pilot.SwitchState(command.MoveState);
+                    if (pilot.currentState == command.MoveState && command.PreviousState != null)
+                        pilot.SwitchState(command.PreviousState);
+                    active.Remove(aircraft);
                 }
-                return true;
+                else
+                {
+                    command.MoveState.SetDestination(destination);
+                    if (pilot.currentState != command.MoveState)
+                    {
+                        command.PreviousState = pilot.currentState;
+                        command.MoveState.SetPreviousState(pilot.currentState);
+                        pilot.SwitchState(command.MoveState);
+                    }
+                    return true;
+                }
             }
 
             PilotBaseState previous = pilot.currentState;
-            var state = new HorusAircraftMoveState(pilot, previous, destination);
+            var state = new HorusAircraftMoveState(pilot, previous, destination, persistentHold);
             active[aircraft] = new ActiveCommand
             {
                 Pilot = pilot,
@@ -168,7 +207,14 @@ namespace HorusMod.Interaction
 
         public static bool Hold(Aircraft aircraft, out string reason)
         {
-            return TrySetDestination(aircraft, aircraft != null ? aircraft.GlobalPosition() : default, out reason);
+            return TrySetDestination(aircraft, aircraft != null ? aircraft.GlobalPosition() : default, persistentHold: true, out reason);
+        }
+
+        public static bool IsActive(Aircraft aircraft)
+        {
+            Cleanup();
+            return aircraft != null && active.TryGetValue(aircraft, out ActiveCommand command) &&
+                !command.MoveState.Completed && command.Pilot != null && command.Pilot.currentState == command.MoveState;
         }
 
         public static bool Clear(Aircraft aircraft)
@@ -181,6 +227,13 @@ namespace HorusMod.Interaction
             return true;
         }
 
+        public static void Reset()
+        {
+            var aircraft = new List<Aircraft>(active.Keys);
+            for (int i = 0; i < aircraft.Count; i++) Clear(aircraft[i]);
+            active.Clear();
+        }
+
         private static void Cleanup()
         {
             if (active.Count == 0) return;
@@ -190,7 +243,7 @@ namespace HorusMod.Interaction
                 Aircraft aircraft = pair.Key;
                 ActiveCommand command = pair.Value;
                 if (aircraft == null || aircraft.gameObject == null || aircraft.disabled ||
-                    command?.Pilot == null || command.MoveState == null)
+                    command?.Pilot == null || command.MoveState == null || command.MoveState.Completed)
                     stale.Add(aircraft);
             }
             for (int i = 0; i < stale.Count; i++) active.Remove(stale[i]);

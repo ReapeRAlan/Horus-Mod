@@ -84,12 +84,11 @@ namespace HorusMod.Core
             new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         private int pendingForceIncompatible = -1;
         private string pendingLookupAcknowledgement;
-        // Missile launch speed for individual ordnance spawns (fires straight down onto the click point).
+        // Live-ordnance launch controls. Targeted modes remain explicit/off by default so
+        // an unrelated world selection can never silently redirect a dangerous spawn.
         private float missileLaunchSpeed = 250f;
-        // Off by default: native guidance steers toward the selected unit's actual position,
-        // not the click point, so leaving this on by default breaks "click = impact" the
-        // moment anything happens to be selected. Opt-in only, from the Live Ordnance panel.
-        private bool missileGuideToSelectedTarget = false;
+        private HorusOrdnanceTargetMode ordnanceTargetMode = HorusOrdnanceTargetMode.WorldPoint;
+        private float ordnanceImpactHeight = 300f;
         private readonly Queue<Action> pendingUiActions = new Queue<Action>();
         private bool scrollAxisAvailable = true;
 
@@ -214,7 +213,14 @@ namespace HorusMod.Core
         public HorusInputRouter InputRouter => inputRouter;
         public HorusOverlay WorldOverlay => worldOverlay;
         public IEnumerable<Unit> HorusSpawnedUnits => horusSpawnedUnits;
-        public bool IsPointerOverHorusUI => isMouseOverGUI || HorusContextMenu.IsOpen;
+        public bool IsPointerOverHorusUI
+        {
+            get
+            {
+                Vector2 mouse = RawScreenToScaledGui(Input.mousePosition);
+                return (!hideGUI && windowRect.Contains(mouse)) || HorusContextMenu.ContainsPoint(mouse);
+            }
+        }
         public FormationKind CurrentFormation => FormationSolver.FromName(formationNames[Mathf.Clamp(selectedFormationIndex, 0, formationNames.Length - 1)]);
         public Rect WindowRect { get => windowRect; set => windowRect = value; }
         public float SpawnAltitude => spawnAltitude;
@@ -366,6 +372,7 @@ namespace HorusMod.Core
             horusSpawnedUnits.Clear();
             worldSelection?.Clear();
             inputRouter?.Reset();
+            worldOrders?.Reset();
             HorusUndo.Clear();
             HorusContextMenu.Close();
             UnitBrowser.Reset();
@@ -440,6 +447,7 @@ namespace HorusMod.Core
 
             // Tick economy manager (income, cleanup) even if Horus overlay is not active
             economyManager?.Tick();
+            if (HorusPermissions.InMission()) worldOrders?.Tick();
 
             if (Input.GetKeyDown(HorusPlugin.HotkeyToggleMode.Value))
             {
@@ -1676,15 +1684,122 @@ namespace HorusMod.Core
         }
 
         /// <summary>
-        /// Ghost/placement rotation, special-cased for Live Ordnance so the preview matches
-        /// the actual launch (straight down onto the click point) instead of showing the
-        /// unrelated placement-rotation heading used by every other unit type.
+        /// Default ghost/placement rotation for Live Ordnance. Targeted ordnance replaces
+        /// this with its resolved launch geometry in UpdateGhostAt.
         /// </summary>
         private Quaternion GetGhostPlacementRotation()
         {
             return GetSelectedDefinition() is MissileDefinition
                 ? Quaternion.LookRotation(Vector3.down, Vector3.forward)
                 : GetPlacementRotation();
+        }
+
+        private Unit GetSelectedOrdnanceTarget()
+        {
+            if (worldSelection == null) return null;
+            worldSelection.Purge();
+            if (worldSelection.Count != 1) return null;
+            Unit target = worldSelection.Units[0];
+            return target != null && target.gameObject != null && !target.disabled &&
+                target.unitState != Unit.UnitState.Destroyed ? target : null;
+        }
+
+        private static bool SupportsNativeOrdnanceTracking(MissileDefinition definition)
+        {
+            return definition != null && definition.unitPrefab != null &&
+                definition.unitPrefab.GetComponentInChildren<MissileSeeker>(true) != null;
+        }
+
+        private static Vector3 GetUnitVelocity(Unit unit)
+        {
+            if (unit == null) return Vector3.zero;
+            Rigidbody body = unit.GetComponent<Rigidbody>();
+            if (body == null) body = unit.GetComponentInChildren<Rigidbody>();
+            return body != null ? body.velocity : Vector3.zero;
+        }
+
+        private static float GetTargetClearance(Unit target)
+        {
+            if (target == null) return 20f;
+            float top = target.transform.position.y;
+            Collider[] colliders = target.GetComponentsInChildren<Collider>();
+            for (int i = 0; i < colliders.Length; i++)
+            {
+                Collider collider = colliders[i];
+                if (collider == null || !collider.enabled || collider.isTrigger) continue;
+                top = Mathf.Max(top, collider.bounds.max.y);
+            }
+            return Mathf.Clamp(top - target.transform.position.y + 10f, 20f, 120f);
+        }
+
+        /// <summary>
+        /// Resolves a live weapon's spawn pose without parenting it to the target. Track mode
+        /// launches from the clicked point and hands a real Unit name to the native seeker.
+        /// Impact mode spawns above a linearly predicted target position and preserves native
+        /// weapon physics/fuzing; unguided bombs receive lead but do not become homing weapons.
+        /// </summary>
+        private bool TryResolveOrdnanceLaunch(
+            MissileDefinition definition,
+            Vector3 worldPoint,
+            out Vector3 launchPosition,
+            out Quaternion launchRotation,
+            out string targetUnitName,
+            out string error)
+        {
+            launchPosition = worldPoint;
+            launchRotation = Quaternion.LookRotation(Vector3.down, Vector3.forward);
+            targetUnitName = null;
+            error = null;
+
+            if (ordnanceTargetMode == HorusOrdnanceTargetMode.WorldPoint) return true;
+
+            Unit target = GetSelectedOrdnanceTarget();
+            if (target == null)
+            {
+                error = "Select exactly one active target unit, or choose World Point.";
+                return false;
+            }
+
+            bool hasNativeSeeker = SupportsNativeOrdnanceTracking(definition);
+            if (ordnanceTargetMode == HorusOrdnanceTargetMode.TrackSelected)
+            {
+                if (!hasNativeSeeker)
+                {
+                    error = "This weapon has no native seeker. Use Impact Selected for bombs and unguided ordnance.";
+                    return false;
+                }
+                if (string.IsNullOrWhiteSpace(target.UniqueName))
+                {
+                    error = "The selected unit has no network target name, so native tracking cannot lock it.";
+                    return false;
+                }
+
+                float speed = Mathf.Max(1f, missileLaunchSpeed);
+                Vector3 targetPosition = target.transform.position;
+                float leadTime = Mathf.Clamp(Vector3.Distance(worldPoint, targetPosition) / speed, 0f, 8f);
+                Vector3 aimPoint = targetPosition + GetUnitVelocity(target) * leadTime;
+                Vector3 direction = aimPoint - worldPoint;
+                if (direction.sqrMagnitude < 0.01f) direction = Vector3.down;
+                Vector3 normalizedDirection = direction.normalized;
+                Vector3 upReference = Mathf.Abs(Vector3.Dot(normalizedDirection, Vector3.up)) > 0.98f
+                    ? Vector3.forward
+                    : Vector3.up;
+                launchRotation = Quaternion.LookRotation(normalizedDirection, upReference);
+                targetUnitName = target.UniqueName;
+                return true;
+            }
+
+            float height = Mathf.Max(ordnanceImpactHeight, GetTargetClearance(target));
+            float fallTime = (float)HorusOrdnanceTargetPolicy.EstimateFallTime(height, missileLaunchSpeed);
+            Vector3 predictedTarget = target.transform.position + GetUnitVelocity(target) * Mathf.Clamp(fallTime, 0f, 5f);
+            launchPosition = predictedTarget + Vector3.up * height;
+            launchRotation = Quaternion.LookRotation(Vector3.down, Vector3.forward);
+
+            // A guided weapon may keep correcting after the initial lead. Bombs/rockets have
+            // no seeker and intentionally remain ballistic after the target-relative spawn.
+            if (hasNativeSeeker && !string.IsNullOrWhiteSpace(target.UniqueName))
+                targetUnitName = target.UniqueName;
+            return true;
         }
 
         private float GetOceanLevel()
@@ -2678,7 +2793,16 @@ namespace HorusMod.Core
                     return;
                 }
 
-                ghost.UpdateTransform(GetFinalPlacementPosition(pick.Point, applySpacing: false), GetGhostPlacementRotation());
+                Vector3 ghostPosition = GetFinalPlacementPosition(pick.Point, applySpacing: false);
+                Quaternion ghostRotation = GetGhostPlacementRotation();
+                if (def is MissileDefinition missileDefinition &&
+                    !TryResolveOrdnanceLaunch(missileDefinition, ghostPosition, out ghostPosition,
+                        out ghostRotation, out _, out _))
+                {
+                    ghost.SetVisible(false);
+                    return;
+                }
+                ghost.UpdateTransform(ghostPosition, ghostRotation);
                 ghost.SetVisible(true);
             }
         }
@@ -2686,6 +2810,7 @@ namespace HorusMod.Core
         private void OnDestroy()
         {
             inputRouter?.Deactivate();
+            worldOrders?.Reset();
             RestoreGameCursorState();
             ghost.Dispose();
             HorusTheme.Dispose();
@@ -2874,21 +2999,24 @@ namespace HorusMod.Core
                 };
                 if (def is AircraftDefinition aircraftDefinition)
                     request.Aircraft = BuildAircraftSpawnOptions(aircraftDefinition, hq, placementOptions, true);
-                if (def is MissileDefinition)
+                if (def is MissileDefinition missileDefinition)
                 {
-                    // The click sets the spawn X/Z (already lifted by the current placement
-                    // altitude). Fire straight down from there so impact lands exactly where
-                    // the operator clicked, instead of the old fixed placement-rotation
-                    // heading (spawnYaw), which never pointed at the click location at all.
-                    request.Rotation = Quaternion.LookRotation(Vector3.down, Vector3.forward);
+                    if (!TryResolveOrdnanceLaunch(missileDefinition, position, out Vector3 launchPosition,
+                        out Quaternion launchRotation, out string targetUnitName, out string targetingError))
+                    {
+                        lastSpawnResult = "Blocked: " + targetingError;
+                        HorusToasts.Show(lastSpawnResult);
+                        HorusLog.Warning("Spawn", lastSpawnResult);
+                        return;
+                    }
+                    request.Position = launchPosition.ToGlobalPosition();
+                    request.Rotation = launchRotation;
                     request.MissileLaunchSpeed = missileLaunchSpeed;
                     request.MissileLaunchElevation = 0f;
-                    // Opt-in only: native guidance steers toward the target's actual position,
-                    // not the click point, so this must not engage just because something is
-                    // incidentally selected -- that would silently break "click = impact".
-                    if (missileGuideToSelectedTarget && worldSelection != null &&
-                        worldSelection.Count == 1 && worldSelection.Units[0] != null)
-                        request.TargetUnitName = worldSelection.Units[0].UniqueName;
+                    request.TargetUnitName = targetUnitName;
+                    globalPos = request.Position;
+                    HorusLog.Info("Spawn",
+                        $"Live Ordnance mode={ordnanceTargetMode}, launch={request.Position}, target={(string.IsNullOrEmpty(targetUnitName) ? "none" : targetUnitName)}, impactHeight={ordnanceImpactHeight:F0}m.");
                 }
                 if (!TryAuthorizeSpawnRequest(request, selectedCatalogEntry?.IsLiveOrdnance == true,
                     out string authorizationError))

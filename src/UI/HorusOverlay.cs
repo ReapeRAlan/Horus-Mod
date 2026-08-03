@@ -28,6 +28,12 @@ namespace HorusMod.UI
         private int markerWrite;
         private int hiddenSelectionCount;
         private bool showHelp;
+        private readonly List<GlobalPosition> patrolDraft = new List<GlobalPosition>();
+        private bool patrolPlanning;
+        private bool patrolCursorValid;
+        private GlobalPosition patrolCursor;
+        private HorusGroupOrderTargetMode groupOrderTargetMode;
+        private int groupOrderUnitCount;
 
         public int VisibleCount => items.Count;
 
@@ -52,6 +58,35 @@ namespace HorusMod.UI
                 AddUnit(selection.Hover, true, cam);
         }
 
+        public void SetPatrolDraft(IReadOnlyList<GlobalPosition> points, bool cursorValid, GlobalPosition cursor)
+        {
+            patrolDraft.Clear();
+            if (points != null)
+                for (int i = 0; i < points.Count; i++) patrolDraft.Add(points[i]);
+            patrolPlanning = true;
+            patrolCursorValid = cursorValid;
+            patrolCursor = cursor;
+        }
+
+        public void ClearPatrolDraft()
+        {
+            patrolDraft.Clear();
+            patrolPlanning = false;
+            patrolCursorValid = false;
+        }
+
+        public void SetGroupOrderTargeting(HorusGroupOrderTargetMode mode, int unitCount)
+        {
+            groupOrderTargetMode = mode;
+            groupOrderUnitCount = unitCount;
+        }
+
+        public void ClearGroupOrderTargeting()
+        {
+            groupOrderTargetMode = HorusGroupOrderTargetMode.None;
+            groupOrderUnitCount = 0;
+        }
+
         public void Draw(bool marqueeActive, Rect marqueeRawScreen)
         {
             if (Event.current.type != EventType.Repaint) return;
@@ -61,6 +96,7 @@ namespace HorusMod.UI
             Camera cam = Camera.main;
             if (cam != null)
             {
+                DrawPatrolDraft(cam, white);
                 for (int i = 0; i < markers.Length; i++)
                 {
                     float age = Time.unscaledTime - markers[i].Started;
@@ -116,7 +152,8 @@ namespace HorusMod.UI
                     "<b>HORUS CONTROLS</b>\n" +
                     "LMB select / place · Shift add / repeat place\n" +
                     "Drag LMB box-select · Ctrl remove\n" +
-                    "RMB move · Alt+RMB menu · drag to look\n" +
+                    "RMB unit menu / world move · Alt+RMB world menu\n" +
+                    "Drag RMB to look (stationary hold remains a click)\n" +
                     "MMB / Del delete · Esc cancel\n" +
                     "F focus · H hold · Ctrl+D duplicate\n" +
                     "Ctrl+A select Horus units\n" +
@@ -127,6 +164,40 @@ namespace HorusMod.UI
 
             if (hiddenSelectionCount > 0)
                 GUI.Label(new Rect(Screen.width - 130f, Screen.height - 42f, 110f, 24f), $"+{hiddenSelectionCount} more", HorusTheme.Pill);
+
+            if (patrolPlanning)
+                GUI.Label(new Rect(Screen.width * 0.5f - 260f, 18f, 520f, 26f),
+                    $"PATROL ROUTE · {patrolDraft.Count} point(s) · LMB add · Backspace undo · Enter confirm · Esc cancel",
+                    HorusTheme.Pill);
+            else if (groupOrderTargetMode != HorusGroupOrderTargetMode.None)
+                GUI.Label(new Rect(Screen.width * 0.5f - 310f, 18f, 620f, 26f),
+                    $"{groupOrderUnitCount} UNIT(S) · {HorusGroupOrderTargetPolicy.Prompt(groupOrderTargetMode)}",
+                    HorusTheme.Pill);
+        }
+
+        private void DrawPatrolDraft(Camera cam, Texture2D white)
+        {
+            if (!patrolPlanning || patrolDraft.Count == 0) return;
+            Color color = HorusTheme.Accent;
+            Vector2? previous = null;
+            for (int i = 0; i < patrolDraft.Count; i++)
+            {
+                Vector3 screen = cam.WorldToScreenPoint(patrolDraft[i].ToLocalPosition());
+                if (screen.z <= 0f) { previous = null; continue; }
+                Vector2 point = new Vector2(screen.x, Screen.height - screen.y);
+                if (previous.HasValue) DrawLine(previous.Value, point, color, 2f, white);
+                GUI.color = color;
+                GUI.DrawTexture(new Rect(point.x - 4f, point.y - 4f, 8f, 8f), white);
+                GUI.color = Color.white;
+                GUI.Label(new Rect(point.x + 7f, point.y - 11f, 36f, 22f), (i + 1).ToString(), HorusTheme.Pill);
+                previous = point;
+            }
+            if (patrolCursorValid && previous.HasValue)
+            {
+                Vector3 screen = cam.WorldToScreenPoint(patrolCursor.ToLocalPosition());
+                if (screen.z > 0f)
+                    DrawLine(previous.Value, new Vector2(screen.x, Screen.height - screen.y), new Color(color.r, color.g, color.b, 0.55f), 1f, white);
+            }
         }
 
         private void AddUnit(Unit unit, bool hover, Camera cam)

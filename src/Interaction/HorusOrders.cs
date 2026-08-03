@@ -12,12 +12,21 @@ namespace HorusMod.Interaction
     public sealed class HorusOrders
     {
         private readonly MonoBehaviour runner;
+        private readonly HorusTacticalOrderService tactical;
         public event Action<Vector3, IReadOnlyList<Unit>> OrderIssued;
 
         public HorusOrders(MonoBehaviour runner)
         {
             this.runner = runner;
+            tactical = new HorusTacticalOrderService();
         }
+
+        public int ActiveTacticalOrderCount => tactical.ActiveOrderCount;
+
+        public void Tick() => tactical.Tick();
+        public void Reset() => tactical.Reset();
+        public HorusOrderKind GetOrderKind(Unit unit) => tactical.GetOrderKind(unit);
+        public HorusRulesOfEngagement GetRules(Unit unit) => tactical.GetRules(unit);
 
         public bool IssueMove(IReadOnlyList<Unit> units, GlobalPosition target, FormationKind formation)
         {
@@ -69,7 +78,8 @@ namespace HorusMod.Interaction
                 GlobalPosition destination = destinationLocal.ToGlobalPosition();
                 destinations.Add(destination);
                 SetHold(unit, false);
-                TrySetDestination(unit, destination, playerCommand: true, out _);
+                if (TrySetDestination(unit, destination, playerCommand: true, out _))
+                    tactical.RegisterMove(unit, destination);
                 if ((i + 1) % 25 == 0) yield return null;
             }
 
@@ -87,7 +97,13 @@ namespace HorusMod.Interaction
             if (!HorusPermissions.CanSpawn() || units == null) return;
             int changed = 0;
             for (int i = 0; i < units.Count; i++)
-                if (SetHold(units[i], hold)) changed++;
+            {
+                Unit unit = units[i];
+                if (!SetHold(unit, hold)) continue;
+                if (hold) tactical.RegisterHold(unit);
+                else tactical.ClearOrder(unit, restoreAircraft: false);
+                changed++;
+            }
             HorusToasts.Show(hold ? $"Holding {changed} unit(s)" : $"Released {changed} unit(s)");
         }
 
@@ -98,9 +114,10 @@ namespace HorusMod.Interaction
             for (int i = 0; i < units.Count; i++)
             {
                 Unit unit = units[i];
+                bool tacticalCleared = tactical.ClearOrder(unit);
                 if (unit is Aircraft aircraft)
                 {
-                    if (HorusAircraftOrders.Clear(aircraft)) cleared++;
+                    if (tacticalCleared || HorusAircraftOrders.Clear(aircraft)) cleared++;
                     continue;
                 }
                 if (unit == null || !(unit is ICommandable commandable) || commandable.UnitCommand == null) continue;
@@ -125,7 +142,7 @@ namespace HorusMod.Interaction
             }
             if (unit is Aircraft aircraft)
             {
-                if (!hold) return HorusAircraftOrders.CanCommand(aircraft, out _);
+                if (!hold) return HorusAircraftOrders.Clear(aircraft) || HorusAircraftOrders.CanCommand(aircraft, out _);
                 return HorusAircraftOrders.Hold(aircraft, out _);
             }
             return false;
@@ -151,7 +168,7 @@ namespace HorusMod.Interaction
             return false;
         }
 
-        private static bool CanCommand(Unit unit, out string reason)
+        public static bool CanCommandUnit(Unit unit, out string reason)
         {
             if (unit == null || unit.gameObject == null || unit.disabled)
             {
@@ -167,6 +184,130 @@ namespace HorusMod.Interaction
             }
             reason = "unit has no movement controller";
             return false;
+        }
+
+        private static bool CanCommand(Unit unit, out string reason) => CanCommandUnit(unit, out reason);
+
+        public bool CanAttackTarget(IReadOnlyList<Unit> units, Unit target, out string reason)
+        {
+            reason = "no commandable unit knows this target";
+            if (units == null || target == null) return false;
+            for (int i = 0; i < units.Count; i++)
+                if (HorusTacticalOrderService.CanAttackKnownTarget(units[i], target, out reason)) return true;
+            return false;
+        }
+
+        public bool CanGuardTarget(IReadOnlyList<Unit> units, Unit target, out string reason)
+        {
+            reason = "guard target must be friendly";
+            if (units == null || target == null) return false;
+            for (int i = 0; i < units.Count; i++)
+            {
+                Unit unit = units[i];
+                if (unit != null && unit != target && unit.NetworkHQ != null && target.NetworkHQ == unit.NetworkHQ &&
+                    CanCommandUnit(unit, out _))
+                {
+                    reason = null;
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        public bool IsTacticalTarget(IReadOnlyList<Unit> units, Unit target)
+        {
+            if (units == null || target == null) return false;
+            for (int i = 0; i < units.Count; i++)
+            {
+                Unit unit = units[i];
+                if (unit != null && unit != target && unit.NetworkHQ != null) return true;
+            }
+            return false;
+        }
+
+        public bool IssueAttackTarget(IReadOnlyList<Unit> units, Unit target)
+        {
+            if (!HorusPermissions.CanSpawn() || units == null || target == null) return false;
+            int accepted = 0;
+            string firstReason = null;
+            for (int i = 0; i < units.Count; i++)
+            {
+                if (tactical.RegisterAttackTarget(units[i], target, out string reason)) accepted++;
+                else if (firstReason == null) firstReason = reason;
+            }
+            HorusToasts.Show(accepted > 0 ? $"Attack target: {accepted} unit(s)" : "Attack rejected: " + (firstReason ?? "target unavailable"));
+            return accepted > 0;
+        }
+
+        public bool IssueAttackMove(IReadOnlyList<Unit> units, GlobalPosition target)
+        {
+            if (!HorusPermissions.CanSpawn() || units == null) return false;
+            int accepted = 0;
+            string firstReason = null;
+            for (int i = 0; i < units.Count; i++)
+            {
+                if (tactical.RegisterAttackMove(units[i], target, out string reason)) accepted++;
+                else if (firstReason == null) firstReason = reason;
+            }
+            if (accepted > 0) OrderIssued?.Invoke(target.ToLocalPosition(), CopyAccepted(units));
+            HorusToasts.Show(accepted > 0 ? $"Attack-move: {accepted} unit(s)" : "Attack-move rejected: " + (firstReason ?? "no commandable units"));
+            return accepted > 0;
+        }
+
+        public bool IssuePatrol(IReadOnlyList<Unit> units, IReadOnlyList<GlobalPosition> waypoints)
+        {
+            if (!HorusPermissions.CanSpawn() || units == null || waypoints == null || waypoints.Count < 2) return false;
+            int accepted = 0;
+            string firstReason = null;
+            for (int i = 0; i < units.Count; i++)
+            {
+                if (tactical.RegisterPatrol(units[i], waypoints, out string reason)) accepted++;
+                else if (firstReason == null) firstReason = reason;
+            }
+            HorusToasts.Show(accepted > 0 ? $"Patrol route: {accepted} unit(s), {waypoints.Count} points" : "Patrol rejected: " + (firstReason ?? "no commandable units"));
+            return accepted > 0;
+        }
+
+        public bool IssueGuard(IReadOnlyList<Unit> units, Unit target)
+        {
+            if (!HorusPermissions.CanSpawn() || units == null || target == null) return false;
+            int accepted = 0;
+            string firstReason = null;
+            for (int i = 0; i < units.Count; i++)
+            {
+                Unit unit = units[i];
+                float spacing = unit is Aircraft ? 250f : unit is Ship ? 120f : 50f;
+                int rank = i / 2 + 1;
+                float lateral = (i % 2 == 0 ? -1f : 1f) * spacing * rank;
+                Vector3 offset = new Vector3(lateral, 0f, -spacing * rank);
+                if (tactical.RegisterGuard(unit, target, offset, out string reason)) accepted++;
+                else if (firstReason == null) firstReason = reason;
+            }
+            HorusToasts.Show(accepted > 0 ? $"Guard/escort: {accepted} unit(s)" : "Guard rejected: " + (firstReason ?? "invalid friendly target"));
+            return accepted > 0;
+        }
+
+        public void SetRules(IReadOnlyList<Unit> units, HorusRulesOfEngagement value)
+        {
+            if (!HorusPermissions.CanSpawn() || units == null) return;
+            int changed = 0;
+            for (int i = 0; i < units.Count; i++)
+            {
+                Unit unit = units[i];
+                if (unit == null || (unit is Aircraft aircraft && aircraft.Player != null)) continue;
+                tactical.SetRules(unit, value);
+                changed++;
+            }
+            HorusToasts.Show($"ROE {value}: {changed} unit(s)");
+        }
+
+        private static IReadOnlyList<Unit> CopyAccepted(IReadOnlyList<Unit> units)
+        {
+            var copy = new List<Unit>();
+            if (units != null)
+                for (int i = 0; i < units.Count; i++)
+                    if (units[i] != null) copy.Add(units[i]);
+            return copy;
         }
 
         private static GlobalPosition GetCurrentDestination(Unit unit)

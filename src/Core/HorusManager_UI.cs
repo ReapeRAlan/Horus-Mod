@@ -15,6 +15,7 @@ using HorusMod.Compat;
 using HorusMod.Interaction;
 using HorusMod.Loadouts;
 using HorusMod.Spawning;
+using HorusMod.UI.ContextMenu;
 
 namespace HorusMod.Core
 {
@@ -128,19 +129,42 @@ namespace HorusMod.Core
 
             if (entry.IsLiveOrdnance)
             {
-                GUILayout.Label("LIVE ORDNANCE · individual Sandbox spawn only", HorusTheme.LabelWrap);
-                GUILayout.Label("Spawns above the clicked point (raise/lower with the altitude control) and drops straight down onto it — wherever you click is where it lands.", HorusTheme.LabelWrap);
+                GUILayout.Label("LIVE ORDNANCE - individual Sandbox spawn only", HorusTheme.LabelWrap);
 
-                bool hasSingleSelection = worldSelection != null && worldSelection.Count == 1 && worldSelection.Units[0] != null;
+                Unit ordnanceTarget = GetSelectedOrdnanceTarget();
+                bool hasTarget = ordnanceTarget != null;
+                bool hasNativeSeeker = SupportsNativeOrdnanceTracking(entry.Def as MissileDefinition);
+                string targetName = hasTarget ? ordnanceTarget.unitName : "no single unit selected";
+
+                GUILayout.Label("TARGET MODE", HorusTheme.TitleText);
+                if (GUILayout.Toggle(ordnanceTargetMode == HorusOrdnanceTargetMode.WorldPoint,
+                    " World Point - drop vertically where you click"))
+                    ordnanceTargetMode = HorusOrdnanceTargetMode.WorldPoint;
+
                 bool previousGuideEnabled = GUI.enabled;
-                GUI.enabled = previousGuideEnabled && hasSingleSelection;
-                missileGuideToSelectedTarget = GUILayout.Toggle(missileGuideToSelectedTarget && hasSingleSelection,
-                    hasSingleSelection
-                        ? $" Guide toward selected unit ({worldSelection.Units[0].unitName}) instead of the click point"
-                        : " Guide toward selected unit (select exactly one unit first)");
+                GUI.enabled = previousGuideEnabled && hasTarget && hasNativeSeeker;
+                if (GUILayout.Toggle(ordnanceTargetMode == HorusOrdnanceTargetMode.TrackSelected,
+                    $" Track Selected - native seeker follows {targetName}"))
+                    ordnanceTargetMode = HorusOrdnanceTargetMode.TrackSelected;
+                GUI.enabled = previousGuideEnabled && hasTarget;
+                if (GUILayout.Toggle(ordnanceTargetMode == HorusOrdnanceTargetMode.ImpactSelected,
+                    $" Impact Selected - spawn above {targetName}"))
+                    ordnanceTargetMode = HorusOrdnanceTargetMode.ImpactSelected;
                 GUI.enabled = previousGuideEnabled;
-                if (missileGuideToSelectedTarget && hasSingleSelection)
-                    GUILayout.Label("Native guidance will steer toward that unit's actual position — it may land away from where you click, especially if the unit moves.", HorusTheme.LabelMuted);
+
+                if (!hasTarget)
+                    GUILayout.Label("Select exactly one active unit before choosing a targeted mode.", HorusTheme.LabelMuted);
+                else if (!hasNativeSeeker)
+                    GUILayout.Label("This bomb/rocket has no native seeker: Track Selected is unavailable, but Impact Selected leads the unit's current motion.", HorusTheme.LabelMuted);
+
+                if (ordnanceTargetMode == HorusOrdnanceTargetMode.TrackSelected)
+                    GUILayout.Label("The click is the launch point. Horus aims at the moving unit and passes its real network name to the native seeker.", HorusTheme.LabelMuted);
+                else if (ordnanceTargetMode == HorusOrdnanceTargetMode.ImpactSelected)
+                {
+                    GUILayout.Label("The click only confirms the shot. Horus spawns above the selected unit, leads its velocity, and keeps native physics, fuze, and damage.", HorusTheme.LabelMuted);
+                    GUILayout.Label($"Target-relative height: {ordnanceImpactHeight:0} m");
+                    ordnanceImpactHeight = Mathf.Round(GUILayout.HorizontalSlider(ordnanceImpactHeight, 50f, 1500f) / 10f) * 10f;
+                }
 
                 GUILayout.Label($"Launch speed: {missileLaunchSpeed:0} m/s");
                 missileLaunchSpeed = Mathf.Round(GUILayout.HorizontalSlider(missileLaunchSpeed, 0f, 1000f) / 10f) * 10f;
@@ -165,9 +189,95 @@ namespace HorusMod.Core
                 foreach (Unit unit in WorldSelection.Units)
                     if (unit != null) GUILayout.Label($"• {unit.unitName}", HorusTheme.LabelSmall);
             GUILayout.Space(8f);
+            DrawTacticalOrdersPanel();
+            GUILayout.Space(8f);
             DrawSelectedAircraftEditor();
             GUILayout.Label("DANGER ZONE", HorusTheme.TitleText);
             DrawSafeDeleteSection();
+        }
+
+        private void DrawTacticalOrdersPanel()
+        {
+            GUILayout.BeginVertical(HorusTheme.Card);
+            GUILayout.Label("TACTICAL ORDERS", HorusTheme.TitleText);
+            bool hasSelection = WorldSelection != null && WorldSelection.HasSelection;
+            bool canCommand = hasSelection && HorusPermissions.CanSpawn() && inputRouter != null;
+
+            if (!hasSelection)
+            {
+                GUILayout.Label("Select one or more units, then use RMB on a unit to open its visual command menu.", HorusTheme.LabelWrap);
+                GUILayout.EndVertical();
+                return;
+            }
+
+            Unit first = WorldSelection.Units[0];
+            HorusOrderKind order = first != null && worldOrders != null
+                ? worldOrders.GetOrderKind(first)
+                : HorusOrderKind.None;
+            HorusRulesOfEngagement rules = first != null && worldOrders != null
+                ? worldOrders.GetRules(first)
+                : HorusRulesOfEngagement.WeaponsFree;
+            GUILayout.Label($"Current: {order}  |  ROE: {rules}", HorusTheme.LabelSmall);
+
+            bool previousEnabled = GUI.enabled;
+            GUI.enabled = previousEnabled && canCommand;
+            if (GUILayout.Button("OPEN ORDERS MENU", HorusTheme.ButtonPrimary, GUILayout.Height(30f)))
+                OpenSelectionOrdersMenu();
+
+            GUILayout.Label("GROUP TARGET ORDERS", HorusTheme.LabelMuted);
+            GUILayout.BeginHorizontal();
+            if (HorusWidgets.Secondary("Move..."))
+                inputRouter.BeginGroupOrderTargeting(HorusGroupOrderTargetMode.Move, WorldSelection.Units);
+            if (HorusWidgets.Secondary("Attack-Move..."))
+                inputRouter.BeginGroupOrderTargeting(HorusGroupOrderTargetMode.AttackMove, WorldSelection.Units);
+            GUILayout.EndHorizontal();
+            GUILayout.BeginHorizontal();
+            if (HorusWidgets.Secondary("Patrol..."))
+                inputRouter.BeginGroupOrderTargeting(HorusGroupOrderTargetMode.Patrol, WorldSelection.Units);
+            if (HorusWidgets.Secondary("Attack Target..."))
+                inputRouter.BeginGroupOrderTargeting(HorusGroupOrderTargetMode.AttackTarget, WorldSelection.Units);
+            GUILayout.EndHorizontal();
+            if (HorusWidgets.Secondary("Guard / Escort..."))
+                inputRouter.BeginGroupOrderTargeting(HorusGroupOrderTargetMode.Guard, WorldSelection.Units);
+
+            GUILayout.BeginHorizontal();
+            if (HorusWidgets.Secondary("Hold (H)")) QueueUiAction(() => worldOrders.SetHold(WorldSelection.Units, true));
+            if (HorusWidgets.Secondary("Clear orders")) QueueUiAction(() => worldOrders.ClearOrders(WorldSelection.Units));
+            GUILayout.EndHorizontal();
+            GUILayout.BeginHorizontal();
+            if (HorusWidgets.Secondary("Weapons Free")) QueueUiAction(() => worldOrders.SetRules(WorldSelection.Units, HorusRulesOfEngagement.WeaponsFree));
+            if (HorusWidgets.Secondary("Hold Fire")) QueueUiAction(() => worldOrders.SetRules(WorldSelection.Units, HorusRulesOfEngagement.HoldFire));
+            GUILayout.EndHorizontal();
+            GUI.enabled = previousEnabled;
+
+            GUILayout.Space(4f);
+            GUILayout.Label("RMB terrain: Move.  Alt+RMB terrain: Attack-Move or start Patrol.", HorusTheme.LabelWrap);
+            GUILayout.Label("With units selected, RMB a known enemy to Attack or a friendly unit to Guard/Escort.", HorusTheme.LabelWrap);
+            GUILayout.Label("Patrol: LMB adds points, Backspace removes, Enter confirms, Esc cancels.", HorusTheme.LabelWrap);
+            if (!HorusPermissions.CanSpawn())
+                GUILayout.Label("Commands are available only in single player or to the local multiplayer host.", HorusTheme.LabelMuted);
+            GUILayout.EndVertical();
+        }
+
+        private void OpenSelectionOrdersMenu()
+        {
+            if (WorldSelection == null || !WorldSelection.HasSelection || worldOrders == null) return;
+            Unit selected = WorldSelection.Units[0];
+            if (selected == null) return;
+            var pick = new WorldPick { Unit = selected, Valid = false };
+            List<ContextMenuItem> items;
+            try
+            {
+                items = HorusContextMenuBuilder.BuildForUnits(this, WorldSelection, worldOrders, pick);
+            }
+            catch (Exception ex)
+            {
+                HorusLog.Error("UI", $"Selection menu builder failed; opening tactical fallback. {ex}");
+                items = HorusContextMenuBuilder.BuildFallbackForSelection(this, WorldSelection, worldOrders);
+            }
+            Vector2 anchor = new Vector2(windowRect.xMax + 6f, windowRect.y + 72f);
+            HorusContextMenu.Open(anchor, items);
+            HorusLog.Info("UI", $"Manage orders menu opened with {items.Count} option(s).");
         }
 
         internal void DrawRtsConfiguration()

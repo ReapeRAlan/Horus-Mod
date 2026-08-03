@@ -10,6 +10,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Remove="tests\**\*.cs" />
     <Reference Include="BepInEx">
       <HintPath>$(NuclearOptionDir)\BepInEx\core\BepInEx.dll</HintPath>
       <Private>False</Private>

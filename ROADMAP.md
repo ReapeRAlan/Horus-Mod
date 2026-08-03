@@ -43,7 +43,7 @@ This roadmap separates released behavior from work that is still under developme
 - Add `Logistics`, `Ammo`, `Naval Resupply`, `Fuel`, and `Storage` filters plus a `Can resupply ships: yes/no/unknown` diagnostic.
 - Offer **Spawn Naval Resupply** only for a definition whose prefab reports naval rearm capability. The selected ship can provide faction and an in-range placement target; Neutral cannot perform functional rearming.
 - Expose `MissileDefinition` entries as **Live Ordnance** for individual placement only. They remain excluded from groups, repeat placement, RTS presets, and factory queues.
-- Spawn above the clicked point and fire straight down, so the click location is the impact point, with an explicit off-by-default **Guide toward selected unit** toggle for native target-lock instead. No launch confirmation is required.
+- Spawn above the clicked point and fire straight down, so the click location is the impact point. Targeted launch modes were subsequently expanded in v1.4.3. No launch confirmation is required.
 
 ### Runtime validation still required
 
@@ -52,7 +52,25 @@ This roadmap separates released behavior from work that is still under developme
 - Validate hidden, event, lookup-only, and mod-provided definitions individually. Visibility in the catalog does not prove that a prefab is network-safe.
 - A reusable **Naval Ammo Depot** preset will not be added while the available candidates appear to be single-use supplies.
 
-## After v1.3.0 - Dedicated server support
+## Shipped in v1.3.1
+
+- Reliable RMB context menus that ignore transparent HUD graphics, distinguish drag by movement rather than hold duration, and allow one-click menu relocation.
+- Structured Verbose RMB diagnostics for runtime reports.
+
+## Shipped in v1.4.0
+
+- Tactical Attack Target, Attack-Move, multi-point Patrol, Guard/Escort, and per-unit ROE for compatible host-controlled AI.
+- Native-intelligence target validation and automatic aircraft combat/resume behavior.
+- Correct Move/Rally/Hold lifecycle for AI aircraft.
+- Experimental global conventional-AI bombing correction with a fail-open compatibility switch.
+
+## Shipped in v1.4.3
+
+- Explicit **World Point**, **Track Selected**, and **Impact Selected** modes for Live Ordnance.
+- Native seeker tracking from a chosen launch point for guided missiles.
+- Target-relative, velocity-led overhead spawning for bombs, rockets, and guided weapons without attaching a projectile to the target or replacing native damage/fuze behavior.
+
+## After v1.4.3 - Dedicated server support
 
 Dedicated/headless control is not supported yet. The intended architecture is:
 
@@ -73,6 +91,6 @@ References:
 
 ## Release policy
 
-- v1.3.0 published 2026-07-31 with explicit approval; v1.2.4 remains available as the prior rollback checkpoint.
+- v1.3.0 published 2026-07-31; v1.3.1 and v1.4.0 were built as the approved RMB/tactical release sequence on 2026-08-03; v1.4.1 fixes the deferred IMGUI context-menu lifecycle; v1.4.2 adds global-English menus and group target orders; v1.4.3 adds explicit target-relative Live Ordnance modes.
 - Do not publish, push, tag, or package a new version without explicit approval.
 - Keep runtime-dependent behavior marked experimental or unknown until it passes the acceptance checks above.

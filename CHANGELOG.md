@@ -2,6 +2,75 @@
 
 ## [Unreleased]
 
+## [1.4.3] - 2026-08-03
+
+### Added
+
+- Live Ordnance now has three explicit English target modes: **World Point**, **Track Selected**, and **Impact Selected**.
+- **Track Selected** launches from the clicked point, aims with linear motion lead, passes the selected unit's network name to the native seeker, and is disabled for bombs/rockets without a seeker.
+- **Impact Selected** treats the click as confirmation, spawns the weapon at a configurable safe height above the selected unit, and leads its current velocity. Guided weapons continue native tracking; unguided bombs remain ballistic.
+- The target-relative launch pose is shown by the existing local ghost preview, and blocked target modes now return an actionable reason instead of silently falling back to the click point.
+- Firing Live Ordnance now keeps the designated target selected instead of replacing the selection with the spawned projectile.
+
+### Changed
+
+- Live Ordnance is never parented or teleported onto a target after spawning. Targeted shots retain native rigidbody physics, arming/fuze behavior, collision, damage, and network spawning.
+
+## [1.4.2] - 2026-08-03
+
+### Added
+
+- Multi-selection now exposes group target modes for Move, Attack-Move, Patrol, Attack Target, and Guard/Escort from both the unit context menu and the Manage tab. One LMB target applies the selected order to the whole captured group; RMB or Esc cancels targeting.
+- Group target modes show a persistent world overlay and editor status until the destination or unit target is accepted.
+
+### Changed
+
+- Standardized every contextual-menu label, header, tooltip, and fallback action on global English instead of applying Spanish text to every player.
+
+## [1.4.1] - 2026-08-03
+
+### Fixed
+
+- Fixed the unit RMB menu aborting after selection because `GUI.skin` was queried from `Update`, outside Unity's legal `OnGUI` lifecycle. Menu layout is now deferred to the next IMGUI pass.
+- Added a safe tactical fallback if optional aircraft/loadout menu construction fails, with the full exception recorded in the BepInEx log.
+
+### Added
+
+- Added a visible **Tactical Orders** card to the Manage tab with an **Open Orders Menu** button, direct Hold/Clear/ROE controls, current order state, and concise instructions for Move, Attack-Move, Patrol, Attack Target, and Guard/Escort.
+- Successful RMB unit-menu openings now leave a Normal-level diagnostic with the target unit and option count.
+
+## [1.4.0] - 2026-08-03
+
+### Added
+
+- Host-authoritative tactical order registry with Move, Hold, Attack Target, Attack-Move, multi-waypoint Patrol, and Guard/Escort for compatible aircraft, ground units, and ships.
+- Context-sensitive unit actions: right-clicking a known enemy preserves the current selection and offers Attack Target; right-clicking a friendly offers Guard/Escort.
+- Multi-waypoint patrol planning with live world preview, LMB to add points, Backspace to undo, Enter to confirm, and Esc to cancel.
+- Per-unit Rules of Engagement with Weapons Free and Hold Fire. Hold Fire gates offensive station, mount, and remote fire paths while leaving player aircraft and countermeasures untouched.
+- `ImproveAIBombingAccuracy`, enabled by default, corrects conventional AI bomb release for target motion, ballistic fall, and rail/ejection delay while retaining skill-dependent zero-mean dispersion.
+- Focused automated logic tests for RMB gesture classification, context-menu ownership, and patrol route progression.
+
+### Changed
+
+- Attack Target only uses contacts already present in the commanding unit's native faction tracking database; Horus does not create or refresh intelligence contacts.
+- Attack-Move, Patrol, and Guard aircraft temporarily return to native combat when an engageable known threat is in range, then resume their Horus route after the threat clears.
+- Tactical options are hidden when no selected unit supports the required movement controller.
+
+### Fixed
+
+- Aircraft Move and factory Rally states now complete on arrival and restore the previous native pilot state instead of trapping the aircraft permanently in `Horus move`.
+- Aircraft Hold is now a distinct persistent state and Clear Orders reliably restores native AI.
+- Ground and naval Attack Target orders continuously reassert the selected known target through their native weapons and turret APIs.
+
+## [1.3.1] - 2026-08-03
+
+### Fixed
+
+- Right-click context menus are no longer suppressed by transparent full-screen game HUD graphics. Horus now blocks RMB only over its own visible surfaces or genuinely interactive native UI controls.
+- An open context menu no longer captures the entire screen. Right-clicking elsewhere relocates the context action in one gesture, while left-clicking outside dismisses the menu without selecting through it.
+- RMB camera look now begins only after 10 pixels of pointer movement; a stationary press remains a click regardless of duration.
+- Added one structured Verbose diagnostic for every RMB gesture, including UI ownership, movement, world pick, outcome, and menu item count.
+
 ## [1.3.0] - 2026-07-31
 
 ### Added
