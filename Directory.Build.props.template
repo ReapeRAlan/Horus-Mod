@@ -1,10 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Project>
-  <!-- 
-    Copy this file to Directory.Build.props and adjust the NuclearOptionDir path 
-    to match your local installation. Do not commit Directory.Build.props to source control.
-  -->
+  <!-- Optional command-line override example for a non-standard local installation. -->
   <PropertyGroup>
-    <NuclearOptionDir>..\</NuclearOptionDir>
+    <NuclearOptionDir Condition="'$(NuclearOptionDir)' == ''">C:\Games\Nuclear Option</NuclearOptionDir>
+    <NuclearOptionManagedDir Condition="'$(NuclearOptionManagedDir)' == ''">$(NuclearOptionDir)\NuclearOption_Data\Managed</NuclearOptionManagedDir>
   </PropertyGroup>
 </Project>

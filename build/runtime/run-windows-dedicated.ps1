@@ -1,0 +1,56 @@
+[CmdletBinding()]
+param(
+    [Parameter(Mandatory = $true)][string]$ServerRoot,
+    [Parameter(Mandatory = $true)][string]$ConfigPath,
+    [int]$DurationMinutes = 2,
+    [string]$EvidenceRoot = ''
+)
+
+$ErrorActionPreference = 'Stop'
+if ($DurationMinutes -lt 1) { throw 'DurationMinutes must be at least 1.' }
+$root = [System.IO.Path]::GetFullPath($ServerRoot)
+$config = [System.IO.Path]::GetFullPath($ConfigPath)
+$exe = Join-Path $root 'NuclearOptionServer.exe'
+if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) { throw "Windows server executable not found: $exe" }
+if (-not (Test-Path -LiteralPath $config -PathType Leaf)) { throw "Dedicated configuration not found: $config" }
+$parsed = Get-Content -LiteralPath $config -Raw -Encoding UTF8 | ConvertFrom-Json
+if ($parsed.ModdedServer -ne $true) { throw 'The runtime configuration must set ModdedServer=true.' }
+if ([string]::IsNullOrWhiteSpace($EvidenceRoot)) { $EvidenceRoot = Join-Path $root 'runtime-evidence\windows' }
+$stamp = [DateTime]::UtcNow.ToString('yyyyMMdd-HHmmss')
+$evidence = Join-Path ([System.IO.Path]::GetFullPath($EvidenceRoot)) $stamp
+New-Item -ItemType Directory -Path $evidence -Force | Out-Null
+$unityLog = Join-Path $evidence 'server.log'
+$metrics = Join-Path $evidence 'metrics.csv'
+$configCopy = Join-Path $evidence 'DedicatedServerConfig.sanitized.json'
+$sanitized = $parsed
+$sanitized.Password = ''
+[System.IO.File]::WriteAllText($configCopy, ($sanitized | ConvertTo-Json -Depth 8) + "`n", [System.Text.UTF8Encoding]::new($false))
+[System.IO.File]::WriteAllText($metrics, "utc,workingSetBytes,privateBytes,cpuSeconds`n", [System.Text.UTF8Encoding]::new($false))
+
+function Quote-ProcessArgument([string]$Value) { return '"' + $Value.Replace('"', '\"') + '"' }
+$arguments = @('-batchmode', '-nographics', '-logFile', (Quote-ProcessArgument $unityLog), '-DedicatedServer', (Quote-ProcessArgument $config))
+$process = Start-Process -FilePath $exe -ArgumentList $arguments -WorkingDirectory $root -WindowStyle Hidden -PassThru
+try {
+    $deadline = [DateTime]::UtcNow.AddMinutes($DurationMinutes)
+    while ([DateTime]::UtcNow -lt $deadline) {
+        Start-Sleep -Seconds 10
+        $process.Refresh()
+        if ($process.HasExited) { throw "Dedicated server exited early with code $($process.ExitCode)." }
+        $row = '{0},{1},{2},{3}' -f [DateTime]::UtcNow.ToString('O'), $process.WorkingSet64, $process.PrivateMemorySize64, $process.TotalProcessorTime.TotalSeconds.ToString([Globalization.CultureInfo]::InvariantCulture)
+        Add-Content -LiteralPath $metrics -Value $row -Encoding UTF8
+    }
+} finally {
+    $process.Refresh()
+    if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force }
+}
+
+$bepInLog = Join-Path $root 'BepInEx\LogOutput.log'
+$logs = @($unityLog)
+if (Test-Path -LiteralPath $bepInLog) {
+    $copiedBepInLog = Join-Path $evidence 'BepInEx.LogOutput.log'
+    Copy-Item -LiteralPath $bepInLog -Destination $copiedBepInLog -Force
+    $logs += $copiedBepInLog
+}
+& (Join-Path $PSScriptRoot 'analyze-runtime-logs.ps1') -LogPath $logs -RequiredPattern @('Horus Dedicated Server', 'Waiting for Players before loading next map') -ReportPath (Join-Path $evidence 'analysis.json')
+Get-FileHash -Algorithm SHA256 $exe, $config, (Join-Path $root 'BepInEx\plugins\Horus\Horus.Server.dll'), (Join-Path $root 'BepInEx\plugins\Horus\Horus.Shared.dll') | Select-Object Path, Hash | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $evidence 'hashes.json') -Encoding UTF8
+Write-Host "Windows runtime evidence: $evidence"

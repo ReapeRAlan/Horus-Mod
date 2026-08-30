@@ -2,6 +2,7 @@ bin/
 obj/
 .vs/
 dist/
+runtime-evidence/
+*.log
 *.user
-Directory.Build.props
 *.zip
