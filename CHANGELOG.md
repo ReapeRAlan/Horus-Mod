@@ -2,6 +2,43 @@
 
 ## [Unreleased]
 
+### Added - v2.0.0-rc.1 candidate
+
+- Split artifacts into pure `Horus.Shared`, headless-safe `Horus.Server`, and visual `Horus.Client` assemblies with a common `IHorusCommandGateway` contract.
+- Added a versioned, manually serialized Mirage protocol for authenticated commands, capabilities, results, state requests, paged snapshots, and sequenced state events.
+- Added authoritative dedicated-server execution for spawn, duplicate, safe delete, movement and tactical orders, ROE, aircraft editing, RTS budgets/modes/caps, factory administration and persistence, and undo/redo.
+- Added exact SteamID64 allowlisting sourced only from authenticated `INetworkPlayer.AuthData`, with an empty deny-all template and an opt-in `Horus.Server.cfg`.
+- Added daily sanitized JSONL audit logs with 14-day default retention and optional read-only Nuclei status/diagnostic commands.
+- Added reproducible, parameterized GM, Dedicated, and Full packages with embedded SHA-256 manifests and no automatic deployment.
+- Added a dedicated-server installation/security guide for the official Windows and Linux app and its required acceptance matrix.
+- Added a single fail-fast release validator, public dependency-free CI, UTF-8/global-English checks, deterministic release sidecars, runtime evidence helpers, security policy, upgrade guide, troubleshooting guide, release checklist, and English prerelease notes.
+
+### Security
+
+- Added per-SteamID token-bucket rate limits, request-ID deduplication, session/revision checks, 16 KiB message limits, 64-entity and 32-waypoint limits, and rejection of unknown keys, NaN, infinity, invalid factions, invalid costs, incompatible protocol versions, and stale commands.
+- Tightened allowlist parsing to accept only individual SteamID64 values, reject control characters in stable keys, reject malformed UTF-8 instead of replacing it silently, and emit strictly escaped single-line JSON audit records with bounded parameter metadata.
+- Server-side code re-resolves Unity catalogs and native state; no `Unit`, `Loadout`, `FactionHQ`, or other Unity object is accepted over the network.
+- Deletion is limited to Horus-owned units by default. UDP-only connections, display names, factions, passwords, and claimed owner IDs never grant GM authority.
+
+### Changed
+
+- Client visual state, selection, camera, previews, hotkeys, favorites, and preset editing remain local; every world mutation uses the same local or remote authoritative gateway.
+- The dedicated factory runtime now shares the six client presets, validates type-correct queues, persists full runtime state, and delegates produced-unit replication to native game APIs.
+- Targeted naval resupply now carries a stable ship identity so the dedicated server can validate the ship and issue its native rearm request after spawning a compatible supply object.
+- Project targets are aligned to deterministic .NET Framework reference assemblies, resolving the former `System.IO.Compression` assembly-version conflict instead of suppressing it.
+
+### Validation
+
+- The first official Windows headless smoke test exposed and fixed BepInEx 5 rejecting a prerelease suffix in the plugin attribute; the BepInEx metadata now uses numeric `2.0.0` while Horus retains `2.0.0-rc.1` as its displayed/informational version.
+- Dedicated installation now explicitly requires BepInEx `HideManagerGameObject = true` so Nuclear Option scene transitions preserve the plugin runtime and its Mirage handler.
+- The Windows smoke tests also exposed Unity `JsonUtility` dropping nested factory/economy fields. Client and dedicated economy persistence plus dedicated factory persistence now use the game-provided Newtonsoft.Json assembly; dedicated reload is runtime-validated after restart.
+- Client factory preset parsing now preserves production queues through Newtonsoft as well, eliminating the repeated startup migration caused by dropped list fields.
+- Factory normalization no longer marks the non-producing Economy preset as changed merely because its intentional production interval is zero.
+- Expanded the pure logic suite from 26 to 80 checks, including every packet round-trip, strict UTF-8, truncation/magic/kind failures, exact boundary limits, individual SteamID64 parsing, deduplication capacity, rate limits, snapshot paging, mission state reset, audit JSON/retention, full factory/economy snapshots, and malformed message handling.
+- Added an assembly-reference gate that rejects UI, IMGUI, camera/input module, or Rewired references from `Horus.Server.dll`.
+- Production release remains blocked until the documented official Windows and Linux headless runtime matrix, two-client behavior, and four-hour soak pass.
+- The prerelease may transparently retain `PENDING – second legitimate Steam identity unavailable`; two simultaneous GMs and two concurrent identities cannot be simulated with Windows user profiles. These pending cases continue to block the stable `v2.0.0` release.
+
 ## [1.4.3] - 2026-08-03
 
 ### Added

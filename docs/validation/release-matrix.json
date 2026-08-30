@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "version": "2.0.0-rc.1",
+  "updatedUtc": "2026-08-30T00:00:00Z",
+  "statuses": ["PASS", "FAIL", "PENDING", "BLOCKED"],
+  "checks": [
+    {
+      "id": "automated-portable",
+      "platform": "portable",
+      "status": "PASS",
+      "evidence": "80 pure logic, protocol, security, paging, state, and audit checks",
+      "notes": "Re-run through build/validate-release.ps1 before publication."
+    },
+    {
+      "id": "windows-headless-smoke",
+      "platform": "windows",
+      "status": "PASS",
+      "evidence": "docs/validation/2026-08-30-windows-smoke.md",
+      "notes": "Startup, Steam login, Mirage registration, deny-all policy, persistence restart, and BuiltIn mission selection passed."
+    },
+    {
+      "id": "windows-full-runtime",
+      "platform": "windows",
+      "status": "PENDING",
+      "evidence": "",
+      "notes": "Workshop, rotations, remote mutation matrix, reconnect, resync, abuse, and soak remain to be executed."
+    },
+    {
+      "id": "linux-official-runtime",
+      "platform": "linux-wsl2",
+      "status": "PENDING",
+      "evidence": "",
+      "notes": "Official Linux depot is present; WSL 2 runtime is not installed yet."
+    },
+    {
+      "id": "two-steam-identities",
+      "platform": "multiplayer",
+      "status": "PENDING",
+      "evidence": "",
+      "notes": "Second legitimate Steam identity unavailable."
+    },
+    {
+      "id": "release-assets",
+      "platform": "packaging",
+      "status": "PENDING",
+      "evidence": "dist/SHA256SUMS.txt and dist/release-manifest.json",
+      "notes": "Regenerate after all tracked release files are finalized."
+    }
+  ]
+}
