@@ -1,16 +1,26 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>netstandard2.1</TargetFramework>
+    <TargetFramework>net472</TargetFramework>
     <ImplicitUsings>disable</ImplicitUsings>
     <Nullable>disable</Nullable>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <LangVersion>latest</LangVersion>
-    <AssemblyName>HorusMod</AssemblyName>
+    <AssemblyName>Horus.Client</AssemblyName>
+    <DefineConstants>HORUS_CLIENT</DefineConstants>
+    <Version>2.0.0-rc.1</Version>
+    <AssemblyVersion>2.0.0.0</AssemblyVersion>
+    <FileVersion>2.0.0.0</FileVersion>
+    <InformationalVersion>2.0.0-rc.1</InformationalVersion>
+    <NuclearOptionManagedDir Condition="'$(NuclearOptionManagedDir)' == ''">$(NuclearOptionDir)\NuclearOption_Data\Managed</NuclearOptionManagedDir>
   </PropertyGroup>
 
   <ItemGroup>
     <Compile Remove="tests\**\*.cs" />
+    <Compile Remove="obj\**\*.cs" />
+    <Compile Remove="src\Shared\**\*.cs" />
+    <Compile Remove="src\Server\**\*.cs" />
+    <ProjectReference Include="Horus.Shared.csproj" />
     <Reference Include="BepInEx">
       <HintPath>$(NuclearOptionDir)\BepInEx\core\BepInEx.dll</HintPath>
       <Private>False</Private>
@@ -20,54 +30,54 @@
       <Private>False</Private>
     </Reference>
     <Reference Include="Assembly-CSharp">
-      <HintPath>$(NuclearOptionDir)\NuclearOption_Data\Managed\Assembly-CSharp.dll</HintPath>
+      <HintPath>$(NuclearOptionManagedDir)\Assembly-CSharp.dll</HintPath>
       <Private>False</Private>
     </Reference>
     <Reference Include="Rewired_Core">
-      <HintPath>$(NuclearOptionDir)\NuclearOption_Data\Managed\Rewired_Core.dll</HintPath>
+      <HintPath>$(NuclearOptionManagedDir)\Rewired_Core.dll</HintPath>
       <Private>False</Private>
     </Reference>
     <Reference Include="UnityEngine">
-      <HintPath>$(NuclearOptionDir)\NuclearOption_Data\Managed\UnityEngine.dll</HintPath>
+      <HintPath>$(NuclearOptionManagedDir)\UnityEngine.dll</HintPath>
       <Private>False</Private>
     </Reference>
     <Reference Include="UnityEngine.CoreModule">
-      <HintPath>$(NuclearOptionDir)\NuclearOption_Data\Managed\UnityEngine.CoreModule.dll</HintPath>
+      <HintPath>$(NuclearOptionManagedDir)\UnityEngine.CoreModule.dll</HintPath>
       <Private>False</Private>
     </Reference>
     <Reference Include="UnityEngine.IMGUIModule">
-      <HintPath>$(NuclearOptionDir)\NuclearOption_Data\Managed\UnityEngine.IMGUIModule.dll</HintPath>
+      <HintPath>$(NuclearOptionManagedDir)\UnityEngine.IMGUIModule.dll</HintPath>
       <Private>False</Private>
     </Reference>
     <Reference Include="UnityEngine.PhysicsModule">
-      <HintPath>$(NuclearOptionDir)\NuclearOption_Data\Managed\UnityEngine.PhysicsModule.dll</HintPath>
+      <HintPath>$(NuclearOptionManagedDir)\UnityEngine.PhysicsModule.dll</HintPath>
       <Private>False</Private>
     </Reference>
     <Reference Include="UnityEngine.JSONSerializeModule">
-      <HintPath>$(NuclearOptionDir)\NuclearOption_Data\Managed\UnityEngine.JSONSerializeModule.dll</HintPath>
+      <HintPath>$(NuclearOptionManagedDir)\UnityEngine.JSONSerializeModule.dll</HintPath>
       <Private>False</Private>
     </Reference>
     <Reference Include="UnityEngine.InputLegacyModule">
-      <HintPath>$(NuclearOptionDir)\NuclearOption_Data\Managed\UnityEngine.InputLegacyModule.dll</HintPath>
+      <HintPath>$(NuclearOptionManagedDir)\UnityEngine.InputLegacyModule.dll</HintPath>
       <Private>False</Private>
     </Reference>
     <Reference Include="UnityEngine.TextRenderingModule">
-      <HintPath>$(NuclearOptionDir)\NuclearOption_Data\Managed\UnityEngine.TextRenderingModule.dll</HintPath>
+      <HintPath>$(NuclearOptionManagedDir)\UnityEngine.TextRenderingModule.dll</HintPath>
       <Private>False</Private>
     </Reference>
     <Reference Include="UnityEngine.UI">
-      <HintPath>$(NuclearOptionDir)\NuclearOption_Data\Managed\UnityEngine.UI.dll</HintPath>
+      <HintPath>$(NuclearOptionManagedDir)\UnityEngine.UI.dll</HintPath>
       <Private>False</Private>
     </Reference>
 
     <Reference Include="Mirage">
-      <HintPath>$(NuclearOptionDir)\NuclearOption_Data\Managed\Mirage.dll</HintPath>
+      <HintPath>$(NuclearOptionManagedDir)\Mirage.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="Newtonsoft.Json">
+      <HintPath>$(NuclearOptionManagedDir)\Newtonsoft.Json.dll</HintPath>
       <Private>False</Private>
     </Reference>
   </ItemGroup>
-
-  <Target Name="PostBuild" AfterTargets="PostBuildEvent">
-    <Exec Command="if not exist &quot;$(ProjectDir)..\BepInEx\plugins\HorusMod&quot; mkdir &quot;$(ProjectDir)..\BepInEx\plugins\HorusMod&quot;&#xD;&#xA;if exist &quot;$(ProjectDir)..\BepInEx\plugins\HorusMod\$(TargetFileName).old&quot; del /F /Q &quot;$(ProjectDir)..\BepInEx\plugins\HorusMod\$(TargetFileName).old&quot;&#xD;&#xA;if exist &quot;$(ProjectDir)..\BepInEx\plugins\HorusMod\$(TargetFileName)&quot; move /Y &quot;$(ProjectDir)..\BepInEx\plugins\HorusMod\$(TargetFileName)&quot; &quot;$(ProjectDir)..\BepInEx\plugins\HorusMod\$(TargetFileName).old&quot;&#xD;&#xA;copy /Y &quot;$(TargetPath)&quot; &quot;$(ProjectDir)..\BepInEx\plugins\HorusMod\$(TargetFileName)&quot;" />
-  </Target>
 
 </Project>

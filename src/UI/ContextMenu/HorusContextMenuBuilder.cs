@@ -27,7 +27,7 @@ namespace HorusMod.UI.ContextMenu
             else
                 units.AddRange(selection.Units);
 
-            bool allowed = HorusPermissions.CanSpawn();
+            bool allowed = HorusPermissions.CanRequestMutation();
             bool movementCompatible = false;
             for (int i = 0; i < units.Count; i++)
                 if (HorusOrders.CanCommandUnit(units[i], out _)) { movementCompatible = true; break; }
@@ -103,7 +103,7 @@ namespace HorusMod.UI.ContextMenu
             items.Add(Gated("Duplicate", "Ctrl+D", allowed && !containsLiveOrdnance,
                 containsLiveOrdnance ? "Live ordnance cannot be duplicated" : denied, manager.DuplicateSelection));
             items.Add(ContextMenuItem.Sep());
-            ContextMenuItem delete = Gated("Delete", "Del", HorusPermissions.CanDelete(), "Host only", manager.DeleteSelection);
+            ContextMenuItem delete = Gated("Delete", "Del", HorusPermissions.CanRequestDelete(), "Host or dedicated GM only", manager.DeleteSelection);
             delete.IsDanger = true;
             items.Add(delete);
             return items;
@@ -115,7 +115,7 @@ namespace HorusMod.UI.ContextMenu
             var units = new List<Unit>(selection.Units);
             if (selection.HasSelection && pick.Valid)
             {
-                bool allowed = HorusPermissions.CanSpawn();
+                bool allowed = HorusPermissions.CanRequestMutation();
                 bool movementCompatible = false;
                 for (int i = 0; i < units.Count; i++)
                     if (HorusOrders.CanCommandUnit(units[i], out _)) { movementCompatible = true; break; }
@@ -138,7 +138,7 @@ namespace HorusMod.UI.ContextMenu
             HorusOrders orders)
         {
             var units = selection != null ? new List<Unit>(selection.Units) : new List<Unit>();
-            bool allowed = HorusPermissions.CanSpawn();
+            bool allowed = HorusPermissions.CanRequestMutation();
             string denied = allowed ? null : "Host only";
             var items = new List<ContextMenuItem>
             {

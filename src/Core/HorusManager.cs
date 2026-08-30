@@ -16,6 +16,10 @@ using HorusMod.UI.ContextMenu;
 using HorusMod.Spawning;
 using HorusMod.Loadouts;
 using UnityEngine.SceneManagement;
+#if HORUS_CLIENT
+using HorusMod.Client;
+using HorusMod.Shared;
+#endif
 
 namespace HorusMod.Core
 {
@@ -1403,7 +1407,7 @@ namespace HorusMod.Core
             lastSpawnedUnit = null;
             lastPlacementConsumed = false;
             lastPlacementWasLiveOrdnance = false;
-            if (!HorusPermissions.CanSpawn()) return null;
+            if (!HorusPermissions.CanRequestMutation()) return null;
             if (!string.IsNullOrEmpty(armedFactoryPresetName))
             {
                 Vector3 position = GetFactoryPlacementPosition(rawPosition, armedFactoryPresetName);
@@ -1467,7 +1471,24 @@ namespace HorusMod.Core
 
         public void DuplicateSelection()
         {
-            if (!HorusPermissions.CanSpawn() || worldSelection == null || Spawner.i == null) return;
+            if (!HorusPermissions.CanRequestMutation() || worldSelection == null || Spawner.i == null) return;
+#if HORUS_CLIENT
+            if (HorusRemoteAuthority.IsRemoteSession)
+            {
+                int requested = 0;
+                foreach (Unit source in worldSelection.Units)
+                {
+                    if (source == null || source.definition == null || FindCatalogEntry(source.definition)?.IsLiveOrdnance == true) continue;
+                    var payload = new HorusCommandPayload();
+                    payload.UnitIds.Add(source.persistentID.Id);
+                    Vector3 offset = source.transform.right * Mathf.Max(25f, source.definition.width * 1.5f);
+                    payload.Points.Add(HorusRemoteAuthority.Point((source.transform.position + offset).ToGlobalPosition()));
+                    if (HorusRemoteAuthority.TrySubmit(HorusCommandKind.Duplicate, payload)) requested++;
+                }
+                HorusToasts.Show(requested > 0 ? $"Requested {requested} duplicate(s)" : "No duplicable units selected");
+                return;
+            }
+#endif
             var duplicates = new List<Unit>();
             foreach (Unit source in worldSelection.Units)
             {
@@ -1554,7 +1575,7 @@ namespace HorusMod.Core
 
         public void DeleteUnits(IEnumerable<Unit> units)
         {
-            if (!HorusPermissions.CanDelete() || units == null) return;
+            if (!HorusPermissions.CanRequestDelete() || units == null) return;
             var copy = new List<Unit>(units);
             int deleted = 0;
             foreach (Unit unit in copy)
@@ -2224,7 +2245,7 @@ namespace HorusMod.Core
 
         internal bool SpawnNavalResupplyQuick()
         {
-            if (!HorusPermissions.CanSpawn()) return false;
+            if (!HorusPermissions.CanRequestMutation()) return false;
             UnitCatalog.EnsureBuilt(MissionManager.AllowEventContent);
             CatalogEntry entry = FindNavalResupplyCandidate();
             if (entry == null)
@@ -2281,7 +2302,10 @@ namespace HorusMod.Core
                 Position = localPosition.ToGlobalPosition(),
                 Rotation = rotation,
                 HQ = hq,
-                UniqueName = (entry.JsonKey ?? "naval_supply") + "_" + Guid.NewGuid().ToString("N").Substring(0, 8)
+                UniqueName = (entry.JsonKey ?? "naval_supply") + "_" + Guid.NewGuid().ToString("N").Substring(0, 8),
+                // The remote codec converts this stable native name back into a persistent ID.
+                // The dedicated server then validates the target is a Ship before requesting rearm.
+                TargetUnitName = selectedShip != null ? selectedShip.UniqueName : null
             };
             if (!TryAuthorizeSpawnRequest(request, false, out string authorizationError))
             {
@@ -2293,6 +2317,14 @@ namespace HorusMod.Core
             {
                 HorusToasts.Show("Naval resupply failed: " + result.Message);
                 return false;
+            }
+
+            if (result.IsRemotePending)
+            {
+                HorusPrefs.AddRecent(entry.JsonKey);
+                lastSpawnResult = "Requested naval resupply: " + entry.Display;
+                HorusToasts.Show(lastSpawnResult);
+                return true;
             }
 
             AddHorusSpawnedUnit(result.Unit);
@@ -2320,7 +2352,7 @@ namespace HorusMod.Core
 
         private void SpawnGroup(Vector3 centerPos)
         {
-            if (!HorusPermissions.CanSpawn())
+            if (!HorusPermissions.CanRequestMutation())
             {
                 HorusLog.Warning("Core", "Horus: host permission required. Cannot spawn.");
                 return;
@@ -2393,6 +2425,7 @@ namespace HorusMod.Core
             HorusLog.Verbose("Spawn", $"Spawning group of {units.Count} unit(s).");
 
             var spawnedUnits = new List<Unit>();
+            int remoteRequested = 0;
 
             for (int i = 0; i < units.Count; i++)
             {
@@ -2407,6 +2440,34 @@ namespace HorusMod.Core
                 Unit spawned;
                 int unitCat = GetUnitCategoryIndex(def);
 
+#if HORUS_CLIENT
+                if (HorusRemoteAuthority.IsRemoteSession)
+                {
+                    var remoteRequest = new HorusSpawnRequest
+                    {
+                        Definition = def,
+                        Position = globalPos,
+                        Rotation = rot,
+                        HQ = hq,
+                        UniqueName = (def.jsonKey ?? "unit") + "_" + Guid.NewGuid().ToString("N").Substring(0, 8),
+                        Stationary = spawnStationary
+                    };
+                    if (def is AircraftDefinition remoteAircraftDefinition)
+                    {
+                        PlacementOptions remoteOptions = CapturePlacementOptions(def);
+                        remoteRequest.Aircraft = BuildAircraftSpawnOptions(remoteAircraftDefinition, hq, remoteOptions,
+                            remoteOptions.ApplyAircraftToWholeGroup);
+                    }
+                    if (!TryAuthorizeSpawnRequest(remoteRequest, false, out string remoteAuthorizationError))
+                    {
+                        HorusLog.Warning("Spawn", $"Group member '{def.unitName}' blocked: {remoteAuthorizationError}");
+                        continue;
+                    }
+                    HorusSpawnResult remoteResult = HorusSpawnService.Spawn(remoteRequest);
+                    if (remoteResult.IsRemotePending) { remoteRequested++; HorusPrefs.AddRecent(def.jsonKey); }
+                    continue;
+                }
+#endif
                 if (IsShipDefinition(def) || unitCat == 2) // Ship
                 {
                     float shipYaw = NormalizeAngle(rot.eulerAngles.y);
@@ -2470,6 +2531,12 @@ namespace HorusMod.Core
             {
                 lastPlacementConsumed = true;
                 HorusToasts.Show($"Spawned group: {spawnedUnits.Count} unit(s)");
+            }
+            else if (remoteRequested > 0)
+            {
+                lastPlacementConsumed = true;
+                lastSpawnResult = $"Requested group: {remoteRequested} unit(s).";
+                HorusToasts.Show(lastSpawnResult);
             }
         }
 
@@ -2693,7 +2760,7 @@ namespace HorusMod.Core
 
         internal void UpdateGhostAt(WorldPick pick)
         {
-            if (!ghostPreviewEnabled || !HorusPermissions.CanSpawn())
+            if (!ghostPreviewEnabled || !HorusPermissions.CanRequestMutation())
             {
                 if (ghost.IsBuilt) ghost.Clear();
                 return;
@@ -2905,7 +2972,7 @@ namespace HorusMod.Core
 
         private void SpawnSelectedUnit(Vector3 position)
         {
-            if (!HorusPermissions.CanSpawn())
+            if (!HorusPermissions.CanRequestMutation())
             {
                 HorusLog.Warning("Core", "Horus: host permission required. Cannot spawn.");
                 return;
@@ -3031,6 +3098,14 @@ namespace HorusMod.Core
                 {
                     lastSpawnResult = "Spawn failed: " + spawnResult.Message;
                     HorusToasts.Show(lastSpawnResult);
+                }
+                else if (spawnResult.IsRemotePending)
+                {
+                    HorusPrefs.AddRecent(def.jsonKey);
+                    lastPlacementConsumed = true;
+                    lastSpawnResult = $"Requested {def.unitName}.";
+                    HorusToasts.Show(lastSpawnResult);
+                    return;
                 }
                 if (spawned != null)
                 {
@@ -3169,6 +3244,13 @@ namespace HorusMod.Core
             spawned = spawnResult.Unit;
             if (!spawnResult.Success)
                 HorusLog.Warning("Spawn", $"SpawnShip failed: {spawnResult.Message}");
+            if (spawnResult.IsRemotePending)
+            {
+                lastPlacementConsumed = true;
+                lastSpawnResult = $"Requested {def.unitName}.";
+                HorusToasts.Show(lastSpawnResult);
+                return null;
+            }
 
             if (spawned != null)
             {

@@ -4,6 +4,10 @@ using Mirage;
 using NuclearOption.SavedMission;
 using UnityEngine;
 using HorusMod.UI;
+#if HORUS_CLIENT
+using HorusMod.Client;
+using HorusMod.Shared;
+#endif
 using HorusMod.Spawning;
 using HorusMod.Data;
 using HorusMod.Loadouts;
@@ -193,6 +197,9 @@ namespace HorusMod.Interaction
 
         public static void Undo()
         {
+#if HORUS_CLIENT
+            if (HorusRemoteAuthority.IsRemoteSession) { HorusRemoteAuthority.TrySubmit(HorusCommandKind.Undo,new HorusCommandPayload());return; }
+#endif
             if (undo.Count == 0) return;
             IAction action = undo.Pop();
             action.Undo();
@@ -202,6 +209,9 @@ namespace HorusMod.Interaction
 
         public static void Redo()
         {
+#if HORUS_CLIENT
+            if (HorusRemoteAuthority.IsRemoteSession) { HorusRemoteAuthority.TrySubmit(HorusCommandKind.Redo,new HorusCommandPayload());return; }
+#endif
             if (redo.Count == 0) return;
             IAction action = redo.Pop();
             action.Redo();

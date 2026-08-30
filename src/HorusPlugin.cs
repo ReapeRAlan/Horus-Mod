@@ -10,12 +10,14 @@ using UnityEngine;
 
 namespace HorusMod
 {
-    [BepInPlugin(PluginGuid, PluginName, PluginVersion)]
+    [BepInPlugin(PluginGuid, PluginName, BepInVersion)]
     public class HorusPlugin : BaseUnityPlugin
     {
         public const string PluginGuid = "com.reaperalan.horusmod";
         public const string PluginName = "Horus Mod Starter";
-        public const string PluginVersion = "1.4.3";
+        // BepInEx 5 parses this field as System.Version and rejects SemVer prerelease suffixes.
+        public const string BepInVersion = "2.0.0";
+        public const string PluginVersion = "2.0.0-rc.1";
 
         public static new ManualLogSource Logger { get; private set; }
         public static ConfigEntry<KeyCode> HotkeyToggleMode { get; private set; }
@@ -61,6 +63,11 @@ namespace HorusMod
         private void Awake()
         {
             Logger = base.Logger;
+            if (GameManager.IsHeadless || Application.isBatchMode)
+            {
+                base.Logger.LogInfo($"{PluginName} {PluginVersion}: client UI skipped in headless/batch mode.");
+                return;
+            }
             HorusLog.Info("Bootstrap", $"[Horus:Bootstrap] Horus Mod v{PluginVersion} loaded at {DateTime.Now:O}");
             try
             {
@@ -216,6 +223,7 @@ namespace HorusMod
             var go = new GameObject("HorusModManager");
             DontDestroyOnLoad(go);
             go.hideFlags = HideFlags.HideAndDontSave;
+            go.AddComponent<Client.HorusClientTransport>();
             go.AddComponent<Core.HorusManager>();
         }
 

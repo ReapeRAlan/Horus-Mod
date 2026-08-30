@@ -5,6 +5,10 @@ using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
 using UnityEngine;
+#if HORUS_CLIENT
+using HorusMod.Client;
+using HorusMod.Shared;
+#endif
 using Mirage;
 using HorusMod.Core;
 using HorusMod.Networking;
@@ -1169,6 +1173,14 @@ namespace HorusMod.Economy
 
         public RtsFactory CreateFactoryAtPlacement(Vector3 localPos, float yaw, string presetName, int factionIndex)
         {
+#if HORUS_CLIENT
+            if (HorusRemoteAuthority.IsRemoteSession)
+            {
+                GlobalPosition remoteGlobalPos=localPos.ToGlobalPosition();
+                var payload=new HorusCommandPayload{PresetName=presetName??"",FactionIndex=factionIndex,Yaw=yaw};payload.Points.Add(HorusRemoteAuthority.Point(remoteGlobalPos));
+                return HorusRemoteAuthority.TrySubmit(HorusCommandKind.CreateFactory,payload)?new RtsFactory{id="pending",presetName=presetName,displayName=presetName,factionId=factionIndex,globalX=remoteGlobalPos.x,globalY=remoteGlobalPos.y,globalZ=remoteGlobalPos.z,yaw=yaw,isVirtual=true}:null;
+            }
+#endif
             if (!CanMutateFactories("create factory")) return null;
             if (config?.settings == null || !config.settings.enableFactories)
             {
@@ -1239,6 +1251,13 @@ namespace HorusMod.Economy
 
         public RtsFactory CreateFactoryFromUnit(Unit targetUnit, string presetName)
         {
+#if HORUS_CLIENT
+            if (HorusRemoteAuthority.IsRemoteSession && targetUnit != null)
+            {
+                int faction=targetUnit.NetworkHQ?.faction!=null&&FactionRegistry.factions!=null?FactionRegistry.factions.IndexOf(targetUnit.NetworkHQ.faction):-1;
+                return CreateFactoryAtPlacement(targetUnit.transform.position,targetUnit.transform.eulerAngles.y,presetName,faction);
+            }
+#endif
             if (!CanMutateFactories("create factory from aimed unit")) return null;
             if (targetUnit == null) return null;
             if (config?.settings == null || !config.settings.enableFactories)
@@ -1303,6 +1322,9 @@ namespace HorusMod.Economy
 
         public void DeleteFactory(RtsFactory factory)
         {
+#if HORUS_CLIENT
+            if (HorusRemoteAuthority.IsRemoteSession) { if(factory!=null)HorusRemoteAuthority.TrySubmit(HorusCommandKind.DeleteFactory,new HorusCommandPayload{FactoryId=factory.id??""});return; }
+#endif
             if (!CanMutateFactories("delete factory")) return;
             if (factory == null) return;
 
@@ -1337,6 +1359,9 @@ namespace HorusMod.Economy
 
         public void SetFactoryEnabled(RtsFactory factory, bool enabled)
         {
+#if HORUS_CLIENT
+            if (HorusRemoteAuthority.IsRemoteSession) { if(factory!=null)HorusRemoteAuthority.TrySubmit(HorusCommandKind.SetFactoryEnabled,new HorusCommandPayload{FactoryId=factory.id??"",BoolValue=enabled});return; }
+#endif
             if (!CanMutateFactories(enabled ? "enable factory" : "disable factory")) return;
             if (factory == null) return;
             factory.enabled = enabled && !factory.anchorDestroyed;
@@ -1346,6 +1371,9 @@ namespace HorusMod.Economy
 
         public void SetFactoryProductionEnabled(RtsFactory factory, bool enabled)
         {
+#if HORUS_CLIENT
+            if (HorusRemoteAuthority.IsRemoteSession) { if(factory!=null)HorusRemoteAuthority.TrySubmit(HorusCommandKind.SetFactoryProductionEnabled,new HorusCommandPayload{FactoryId=factory.id??"",BoolValue=enabled});return; }
+#endif
             if (!CanMutateFactories(enabled ? "start factory production" : "stop factory production")) return;
             if (factory == null) return;
             factory.produceUnits = enabled;
@@ -1355,6 +1383,9 @@ namespace HorusMod.Economy
 
         public void SetFactoryConsumesBudget(RtsFactory factory, bool consumesBudget)
         {
+#if HORUS_CLIENT
+            if (HorusRemoteAuthority.IsRemoteSession) { if(factory!=null)HorusRemoteAuthority.TrySubmit(HorusCommandKind.SetFactoryConsumesBudget,new HorusCommandPayload{FactoryId=factory.id??"",BoolValue=consumesBudget});return; }
+#endif
             if (!CanMutateFactories("edit factory production budget mode")) return;
             if (factory == null) return;
             factory.consumeBudgetForProduction = consumesBudget;
@@ -1363,6 +1394,9 @@ namespace HorusMod.Economy
 
         public void StartAllFactories()
         {
+#if HORUS_CLIENT
+            if (HorusRemoteAuthority.IsRemoteSession) { HorusRemoteAuthority.TrySubmit(HorusCommandKind.StartAllFactories,new HorusCommandPayload());return; }
+#endif
             if (!CanMutateFactories("start all factories")) return;
             foreach (var factory in activeFactories)
             {
@@ -1374,6 +1408,9 @@ namespace HorusMod.Economy
 
         public void StopAllFactories()
         {
+#if HORUS_CLIENT
+            if (HorusRemoteAuthority.IsRemoteSession) { HorusRemoteAuthority.TrySubmit(HorusCommandKind.StopAllFactories,new HorusCommandPayload());return; }
+#endif
             if (!CanMutateFactories("stop all factories")) return;
             foreach (var factory in activeFactories)
             {
@@ -1385,6 +1422,9 @@ namespace HorusMod.Economy
 
         public void AddUnitToProductionQueue(RtsFactory factory, UnitDefinition unitDefinition)
         {
+#if HORUS_CLIENT
+            if (HorusRemoteAuthority.IsRemoteSession) { if(factory!=null&&unitDefinition!=null)HorusRemoteAuthority.TrySubmit(HorusCommandKind.QueueFactoryUnit,new HorusCommandPayload{FactoryId=factory.id??"",DefinitionKey=unitDefinition.jsonKey??""});return; }
+#endif
             if (!CanMutateFactories("add unit to production queue")) return;
             CatalogEntry entry = HorusManager.FindCatalogEntry(unitDefinition);
             if (entry?.IsLiveOrdnance == true || unitDefinition is MissileDefinition)
@@ -1418,6 +1458,9 @@ namespace HorusMod.Economy
 
         public void RemoveProductionQueueItem(RtsFactory factory, int index)
         {
+#if HORUS_CLIENT
+            if (HorusRemoteAuthority.IsRemoteSession) { if(factory!=null)HorusRemoteAuthority.TrySubmit(HorusCommandKind.RemoveFactoryQueueItem,new HorusCommandPayload{FactoryId=factory.id??"",IntValue=index});return; }
+#endif
             if (!CanMutateFactories("remove production queue item")) return;
             if (factory == null || factory.productionUnitKeys == null || index < 0 || index >= factory.productionUnitKeys.Count) return;
             string removed = factory.productionUnitKeys[index];
@@ -1430,6 +1473,9 @@ namespace HorusMod.Economy
 
         public void ClearProductionQueue(RtsFactory factory)
         {
+#if HORUS_CLIENT
+            if (HorusRemoteAuthority.IsRemoteSession) { if(factory!=null)HorusRemoteAuthority.TrySubmit(HorusCommandKind.ClearFactoryQueue,new HorusCommandPayload{FactoryId=factory.id??""});return; }
+#endif
             if (!CanMutateFactories("clear production queue")) return;
             if (factory == null) return;
             if (factory.productionUnitKeys == null) factory.productionUnitKeys = new List<string>();
@@ -1442,6 +1488,9 @@ namespace HorusMod.Economy
 
         public void SetRallyPoint(RtsFactory factory, Vector3 localRallyPoint)
         {
+#if HORUS_CLIENT
+            if (HorusRemoteAuthority.IsRemoteSession) { if(factory!=null){var payload=new HorusCommandPayload{FactoryId=factory.id??""};payload.Points.Add(HorusRemoteAuthority.Point(localRallyPoint.ToGlobalPosition()));HorusRemoteAuthority.TrySubmit(HorusCommandKind.SetFactoryRally,payload);}return; }
+#endif
             if (!CanMutateFactories("set rally point")) return;
             if (factory == null) return;
             var globalRally = localRallyPoint.ToGlobalPosition();
@@ -1455,6 +1504,9 @@ namespace HorusMod.Economy
 
         public void ClearRallyPoint(RtsFactory factory)
         {
+#if HORUS_CLIENT
+            if (HorusRemoteAuthority.IsRemoteSession) { if(factory!=null)HorusRemoteAuthority.TrySubmit(HorusCommandKind.ClearFactoryRally,new HorusCommandPayload{FactoryId=factory.id??""});return; }
+#endif
             if (!CanMutateFactories("clear rally point")) return;
             if (factory == null) return;
             factory.useRallyPoint = false;
@@ -1509,6 +1561,9 @@ namespace HorusMod.Economy
 
         public void ReloadConfig()
         {
+#if HORUS_CLIENT
+            if (HorusRemoteAuthority.IsRemoteSession) { HorusRemoteAuthority.TrySubmit(HorusCommandKind.ReloadFactories,new HorusCommandPayload());return; }
+#endif
             if (!CanMutateFactories("reload factory config")) return;
             LoadOrCreateConfig();
             HorusLog.Info("Factory", "[HORUS RTS] Factory configuration reloaded.");
@@ -1581,7 +1636,11 @@ namespace HorusMod.Economy
 
                 if (string.IsNullOrEmpty(existing.type)) { existing.type = defaultPreset.type; changed = true; }
                 if (string.IsNullOrEmpty(existing.visualBuilding)) { existing.visualBuilding = defaultPreset.visualBuilding; changed = true; }
-                if (existing.productionIntervalSeconds <= 0f) { existing.productionIntervalSeconds = defaultPreset.productionIntervalSeconds; changed = true; }
+                if (existing.productionIntervalSeconds <= 0f && defaultPreset.productionIntervalSeconds > 0f)
+                {
+                    existing.productionIntervalSeconds = defaultPreset.productionIntervalSeconds;
+                    changed = true;
+                }
                 if (existing.maxActiveProducedUnits < 0 || (existing.produceUnits && existing.maxActiveProducedUnits == 0))
                 {
                     existing.maxActiveProducedUnits = defaultPreset.maxActiveProducedUnits;
@@ -1620,6 +1679,9 @@ namespace HorusMod.Economy
 
         public void ResetPresetsToDefaults()
         {
+#if HORUS_CLIENT
+            if (HorusRemoteAuthority.IsRemoteSession) { HorusRemoteAuthority.TrySubmit(HorusCommandKind.ResetFactoryPresets,new HorusCommandPayload());return; }
+#endif
             if (!CanMutateFactories("reset factory presets to defaults")) return;
             config = new RtsFactoriesConfig
             {
@@ -1650,7 +1712,7 @@ namespace HorusMod.Economy
                 if (settingsMatch.Success)
                 {
                     string settingsJson = "{" + settingsMatch.Groups[1].Value + "}";
-                    var loadedSettings = JsonUtility.FromJson<RtsFactoriesSettings>(settingsJson);
+                    var loadedSettings = Newtonsoft.Json.JsonConvert.DeserializeObject<RtsFactoriesSettings>(settingsJson);
                     if (loadedSettings != null) cfg.settings = loadedSettings;
                 }
 
@@ -1668,7 +1730,7 @@ namespace HorusMod.Economy
                             string presetName = m.Groups[1].Value;
                             string body = m.Groups[2].Value;
                             string presetJson = "{" + body + "}";
-                            var preset = JsonUtility.FromJson<FactoryPreset>(presetJson);
+                            var preset = Newtonsoft.Json.JsonConvert.DeserializeObject<FactoryPreset>(presetJson);
                             if (preset != null)
                             {
                                 preset.presetName = presetName;
@@ -1740,6 +1802,9 @@ namespace HorusMod.Economy
 
         public void SaveInstances()
         {
+#if HORUS_CLIENT
+            if (HorusRemoteAuthority.IsRemoteSession && !HorusClientTransport.ApplyingSnapshot) { HorusRemoteAuthority.TrySubmit(HorusCommandKind.SaveFactories,new HorusCommandPayload());return; }
+#endif
             if (!CanMutateFactories("save factories")) return;
             SaveInstancesInternal();
         }
@@ -1766,6 +1831,9 @@ namespace HorusMod.Economy
 
         public void LoadInstances()
         {
+#if HORUS_CLIENT
+            if (HorusRemoteAuthority.IsRemoteSession && !HorusClientTransport.ApplyingSnapshot) { HorusRemoteAuthority.TrySubmit(HorusCommandKind.LoadFactories,new HorusCommandPayload());return; }
+#endif
             if (!CanMutateFactories("load factories")) return;
             LoadInstancesInternal();
             RecreateVirtualFactoryAnchors();

@@ -76,7 +76,7 @@ namespace HorusMod.UI
 
             Rect status = new Rect(0f, rect.height - 25f, rect.width, 25f);
             GUI.Box(status, GUIContent.none, HorusTheme.StatusBar);
-            string permission = HorusPermissions.IsMultiplayerClient() ? "View Only" : "Host";
+            string permission = HorusPermissions.CanRequestMutation() ? "Authority" : "View Only";
             string tool = manager.InputRouter == null
                 ? "SELECT"
                 : manager.InputRouter.GroupOrderTargetMode != HorusMod.Interaction.HorusGroupOrderTargetMode.None

@@ -6,6 +6,10 @@ using HorusMod.Networking;
 using HorusMod.Placement;
 using HorusMod.UI;
 using UnityEngine;
+#if HORUS_CLIENT
+using HorusMod.Client;
+using HorusMod.Shared;
+#endif
 
 namespace HorusMod.Interaction
 {
@@ -30,6 +34,13 @@ namespace HorusMod.Interaction
 
         public bool IssueMove(IReadOnlyList<Unit> units, GlobalPosition target, FormationKind formation)
         {
+#if HORUS_CLIENT
+            if (HorusRemoteAuthority.IsRemoteSession)
+            {
+                HorusCommandPayload payload = RemoteUnits(units); payload.Points.Add(HorusRemoteAuthority.Point(target)); payload.IntValue = (int)formation;
+                return HorusRemoteAuthority.TrySubmit(HorusCommandKind.Move, payload);
+            }
+#endif
             if (!HorusPermissions.CanSpawn() || units == null || units.Count == 0) return false;
             runner.StartCoroutine(IssueMoveRoutine(units, target, formation));
             return true;
@@ -94,6 +105,9 @@ namespace HorusMod.Interaction
 
         public void SetHold(IReadOnlyList<Unit> units, bool hold)
         {
+#if HORUS_CLIENT
+            if (HorusRemoteAuthority.IsRemoteSession) { HorusCommandPayload payload=RemoteUnits(units);payload.BoolValue=hold;HorusRemoteAuthority.TrySubmit(HorusCommandKind.Hold,payload);return; }
+#endif
             if (!HorusPermissions.CanSpawn() || units == null) return;
             int changed = 0;
             for (int i = 0; i < units.Count; i++)
@@ -109,6 +123,9 @@ namespace HorusMod.Interaction
 
         public void ClearOrders(IReadOnlyList<Unit> units)
         {
+#if HORUS_CLIENT
+            if (HorusRemoteAuthority.IsRemoteSession) { HorusRemoteAuthority.TrySubmit(HorusCommandKind.ClearOrders,RemoteUnits(units));return; }
+#endif
             if (!HorusPermissions.CanSpawn() || units == null) return;
             int cleared = 0;
             for (int i = 0; i < units.Count; i++)
@@ -227,6 +244,9 @@ namespace HorusMod.Interaction
 
         public bool IssueAttackTarget(IReadOnlyList<Unit> units, Unit target)
         {
+#if HORUS_CLIENT
+            if (HorusRemoteAuthority.IsRemoteSession) { HorusCommandPayload payload=RemoteUnits(units);payload.TargetUnitId=HorusRemoteAuthority.UnitId(target);return HorusRemoteAuthority.TrySubmit(HorusCommandKind.AttackTarget,payload); }
+#endif
             if (!HorusPermissions.CanSpawn() || units == null || target == null) return false;
             int accepted = 0;
             string firstReason = null;
@@ -241,6 +261,9 @@ namespace HorusMod.Interaction
 
         public bool IssueAttackMove(IReadOnlyList<Unit> units, GlobalPosition target)
         {
+#if HORUS_CLIENT
+            if (HorusRemoteAuthority.IsRemoteSession) { HorusCommandPayload payload=RemoteUnits(units);payload.Points.Add(HorusRemoteAuthority.Point(target));return HorusRemoteAuthority.TrySubmit(HorusCommandKind.AttackMove,payload); }
+#endif
             if (!HorusPermissions.CanSpawn() || units == null) return false;
             int accepted = 0;
             string firstReason = null;
@@ -256,6 +279,9 @@ namespace HorusMod.Interaction
 
         public bool IssuePatrol(IReadOnlyList<Unit> units, IReadOnlyList<GlobalPosition> waypoints)
         {
+#if HORUS_CLIENT
+            if (HorusRemoteAuthority.IsRemoteSession) { HorusCommandPayload payload=RemoteUnits(units);if(waypoints!=null)for(int i=0;i<waypoints.Count&&payload.Points.Count<HorusProtocol.MaxWaypointsPerCommand;i++)payload.Points.Add(HorusRemoteAuthority.Point(waypoints[i]));return HorusRemoteAuthority.TrySubmit(HorusCommandKind.Patrol,payload); }
+#endif
             if (!HorusPermissions.CanSpawn() || units == null || waypoints == null || waypoints.Count < 2) return false;
             int accepted = 0;
             string firstReason = null;
@@ -270,6 +296,9 @@ namespace HorusMod.Interaction
 
         public bool IssueGuard(IReadOnlyList<Unit> units, Unit target)
         {
+#if HORUS_CLIENT
+            if (HorusRemoteAuthority.IsRemoteSession) { HorusCommandPayload payload=RemoteUnits(units);payload.TargetUnitId=HorusRemoteAuthority.UnitId(target);return HorusRemoteAuthority.TrySubmit(HorusCommandKind.Guard,payload); }
+#endif
             if (!HorusPermissions.CanSpawn() || units == null || target == null) return false;
             int accepted = 0;
             string firstReason = null;
@@ -289,6 +318,9 @@ namespace HorusMod.Interaction
 
         public void SetRules(IReadOnlyList<Unit> units, HorusRulesOfEngagement value)
         {
+#if HORUS_CLIENT
+            if (HorusRemoteAuthority.IsRemoteSession) { HorusCommandPayload payload=RemoteUnits(units);payload.IntValue=(int)value;HorusRemoteAuthority.TrySubmit(HorusCommandKind.SetRulesOfEngagement,payload);return; }
+#endif
             if (!HorusPermissions.CanSpawn() || units == null) return;
             int changed = 0;
             for (int i = 0; i < units.Count; i++)
@@ -309,6 +341,15 @@ namespace HorusMod.Interaction
                     if (units[i] != null) copy.Add(units[i]);
             return copy;
         }
+
+#if HORUS_CLIENT
+        private static HorusCommandPayload RemoteUnits(IReadOnlyList<Unit> units)
+        {
+            var payload=new HorusCommandPayload();
+            if(units!=null)for(int i=0;i<units.Count&&payload.UnitIds.Count<HorusProtocol.MaxEntitiesPerCommand;i++)if(units[i]!=null)payload.UnitIds.Add(units[i].persistentID.Id);
+            return payload;
+        }
+#endif
 
         private static GlobalPosition GetCurrentDestination(Unit unit)
         {

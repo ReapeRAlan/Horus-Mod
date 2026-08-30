@@ -1,0 +1,58 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net472</TargetFramework>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Nullable>disable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>Horus.Server</AssemblyName>
+    <RootNamespace>HorusMod.Server</RootNamespace>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <DefineConstants>HORUS_SERVER</DefineConstants>
+    <Version>2.0.0-rc.1</Version>
+    <AssemblyVersion>2.0.0.0</AssemblyVersion>
+    <FileVersion>2.0.0.0</FileVersion>
+    <InformationalVersion>2.0.0-rc.1</InformationalVersion>
+    <NuclearOptionManagedDir Condition="'$(NuclearOptionManagedDir)' == ''">$(NuclearOptionDir)\NuclearOption_Data\Managed</NuclearOptionManagedDir>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="Horus.Shared.csproj" />
+    <Compile Include="src\Server\**\*.cs" />
+    <Compile Include="src\Compat\GameApi.cs" />
+    <Compile Include="src\Data\CatalogModels.cs" />
+    <Compile Include="src\Data\FactionSlot.cs" />
+    <Compile Include="src\Data\HorusPrefs.cs" />
+    <Compile Include="src\Data\SupplyCapabilities.cs" />
+    <Compile Include="src\Data\UnitCatalog.cs" />
+    <Compile Include="src\Economy\HorusEconomyTypes.cs" />
+    <Compile Include="src\Economy\RtsEconomyManager.cs" />
+    <Compile Include="src\Economy\RtsFactory.cs" />
+    <Compile Include="src\Interaction\HorusAircraftOrders.cs" />
+    <Compile Include="src\Interaction\HorusBombingCorrection.cs" />
+    <Compile Include="src\Interaction\HorusOrders.cs" />
+    <Compile Include="src\Interaction\HorusTacticalHarmonyPatches.cs" />
+    <Compile Include="src\Interaction\HorusTacticalOrderService.cs" />
+    <Compile Include="src\Interaction\HorusTacticalTypes.cs" />
+    <Compile Include="src\Interaction\HorusUnitEditor.cs" />
+    <Compile Include="src\Loadouts\LoadoutModels.cs" />
+    <Compile Include="src\Loadouts\LoadoutService.cs" />
+    <Compile Include="src\Logging\HorusLog.cs" />
+    <Compile Include="src\Networking\HorusPermissions.cs" />
+    <Compile Include="src\Placement\FormationSolver.cs" />
+    <Compile Include="src\Placement\PlacementOptions.cs" />
+    <Compile Include="src\Spawning\HorusOrdnanceTargeting.cs" />
+    <Compile Include="src\Spawning\HorusSpawnService.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <Reference Include="BepInEx" HintPath="$(NuclearOptionDir)\BepInEx\core\BepInEx.dll" Private="False" />
+    <Reference Include="0Harmony" HintPath="$(NuclearOptionDir)\BepInEx\core\0Harmony.dll" Private="False" />
+    <Reference Include="Assembly-CSharp" HintPath="$(NuclearOptionManagedDir)\Assembly-CSharp.dll" Private="False" />
+    <Reference Include="Mirage" HintPath="$(NuclearOptionManagedDir)\Mirage.dll" Private="False" />
+    <Reference Include="Newtonsoft.Json" HintPath="$(NuclearOptionManagedDir)\Newtonsoft.Json.dll" Private="False" />
+    <Reference Include="com.rlabrecque.steamworks.net" HintPath="$(NuclearOptionManagedDir)\com.rlabrecque.steamworks.net.dll" Private="False" />
+    <Reference Include="UnityEngine" HintPath="$(NuclearOptionManagedDir)\UnityEngine.dll" Private="False" />
+    <Reference Include="UnityEngine.CoreModule" HintPath="$(NuclearOptionManagedDir)\UnityEngine.CoreModule.dll" Private="False" />
+    <Reference Include="UnityEngine.JSONSerializeModule" HintPath="$(NuclearOptionManagedDir)\UnityEngine.JSONSerializeModule.dll" Private="False" />
+    <Reference Include="UnityEngine.PhysicsModule" HintPath="$(NuclearOptionManagedDir)\UnityEngine.PhysicsModule.dll" Private="False" />
+  </ItemGroup>
+</Project>

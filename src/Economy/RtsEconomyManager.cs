@@ -2,6 +2,10 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
+#if HORUS_CLIENT
+using HorusMod.Client;
+using HorusMod.Shared;
+#endif
 using HorusMod.Networking;
 using HorusMod.Logging;
 
@@ -18,8 +22,38 @@ namespace HorusMod.Economy
         public static RtsEconomyManager Instance { get; private set; }
 
         // ─── Current Mode ────────────────────────────────────────────────────────
-        public HorusMode CurrentMode { get; set; } = HorusMode.Sandbox;
-        public RtsDeployMode DeployMode { get; set; } = RtsDeployMode.FreePlacementPaid;
+        private HorusMode currentMode = HorusMode.Sandbox;
+        private RtsDeployMode deployMode = RtsDeployMode.FreePlacementPaid;
+        public HorusMode CurrentMode
+        {
+            get => currentMode;
+            set
+            {
+#if HORUS_CLIENT
+                if (HorusRemoteAuthority.IsRemoteSession && !HorusClientTransport.ApplyingSnapshot)
+                {
+                    HorusRemoteAuthority.TrySubmit(HorusCommandKind.SetRtsMode,new HorusCommandPayload{IntValue=(int)value});
+                    return;
+                }
+#endif
+                currentMode = value;
+            }
+        }
+        public RtsDeployMode DeployMode
+        {
+            get => deployMode;
+            set
+            {
+#if HORUS_CLIENT
+                if (HorusRemoteAuthority.IsRemoteSession && !HorusClientTransport.ApplyingSnapshot)
+                {
+                    HorusRemoteAuthority.TrySubmit(HorusCommandKind.SetRtsDeployMode,new HorusCommandPayload{IntValue=(int)value});
+                    return;
+                }
+#endif
+                deployMode = value;
+            }
+        }
 
         // ─── Config ──────────────────────────────────────────────────────────────
         private RtsEconomyConfig config;
@@ -60,14 +94,14 @@ namespace HorusMod.Economy
                 if (!System.IO.File.Exists(ConfigPath))
                 {
                     config = CreateDefaultConfig();
-                    string json = JsonUtility.ToJson(config, true);
+                    string json = SerializeConfig(config);
                     System.IO.File.WriteAllText(ConfigPath, json);
                     HorusLog.Info("Economy", $"[RTS Economy] Created default config at {ConfigPath}");
                 }
                 else
                 {
                     string json = System.IO.File.ReadAllText(ConfigPath);
-                    config = JsonUtility.FromJson<RtsEconomyConfig>(json);
+                    config = DeserializeConfig(json);
                     if (config == null) throw new Exception("Parsed config is null");
                     HorusLog.Info("Economy", $"[RTS Economy] Loaded config from {ConfigPath}");
                 }
@@ -149,7 +183,7 @@ namespace HorusMod.Economy
             {
                 if (config != null)
                 {
-                    string json = JsonUtility.ToJson(config, true);
+                    string json = SerializeConfig(config);
                     System.IO.File.WriteAllText(ConfigPath, json);
                 }
             }
@@ -157,6 +191,16 @@ namespace HorusMod.Economy
             {
                 HorusLog.Error("Economy", $"[RTS Economy] Config save failed: {ex.Message}");
             }
+        }
+
+        private static string SerializeConfig(RtsEconomyConfig value)
+        {
+            return Newtonsoft.Json.JsonConvert.SerializeObject(value, Newtonsoft.Json.Formatting.Indented);
+        }
+
+        private static RtsEconomyConfig DeserializeConfig(string json)
+        {
+            return Newtonsoft.Json.JsonConvert.DeserializeObject<RtsEconomyConfig>(json);
         }
 
         private static RtsEconomyConfig CreateDefaultConfig()
@@ -235,6 +279,13 @@ namespace HorusMod.Economy
 
         public void Tick()
         {
+#if HORUS_CLIENT
+            if (HorusRemoteAuthority.IsRemoteSession)
+            {
+                if (HorusPermissions.InMission() && !matchInitialized) InitializeMatch();
+                return;
+            }
+#endif
             if (CurrentMode != HorusMode.RtsCommander) return;
 
             // If we are not in a mission, reset match economy and return
@@ -367,6 +418,13 @@ namespace HorusMod.Economy
 
         public void SetBudget(int factionIndex, float value)
         {
+#if HORUS_CLIENT
+            if (HorusRemoteAuthority.IsRemoteSession && !HorusClientTransport.ApplyingSnapshot)
+            {
+                HorusRemoteAuthority.TrySubmit(HorusCommandKind.SetBudget,new HorusCommandPayload{FactionIndex=factionIndex,FloatValue=value});
+                return;
+            }
+#endif
             if (HorusPlugin.SyncWithFactionBudget != null && HorusPlugin.SyncWithFactionBudget.Value)
             {
                 SetFactionRealBudget(GetGameFaction(factionIndex), value);
@@ -377,12 +435,26 @@ namespace HorusMod.Economy
 
         public void AdjustBudget(int factionIndex, float delta)
         {
+#if HORUS_CLIENT
+            if (HorusRemoteAuthority.IsRemoteSession && !HorusClientTransport.ApplyingSnapshot)
+            {
+                HorusRemoteAuthority.TrySubmit(HorusCommandKind.AdjustBudget,new HorusCommandPayload{FactionIndex=factionIndex,FloatValue=delta});
+                return;
+            }
+#endif
             float current = GetBudget(factionIndex);
             SetBudget(factionIndex, current + delta);
         }
 
         public void AdjustUnitCap(int factionIndex, int delta)
         {
+#if HORUS_CLIENT
+            if (HorusRemoteAuthority.IsRemoteSession && !HorusClientTransport.ApplyingSnapshot)
+            {
+                HorusRemoteAuthority.TrySubmit(HorusCommandKind.AdjustUnitCap,new HorusCommandPayload{FactionIndex=factionIndex,IntValue=delta});
+                return;
+            }
+#endif
             var state = GetFactionState(factionIndex);
             if (state == null) return;
             
@@ -509,6 +581,9 @@ namespace HorusMod.Economy
         /// </summary>
         public void CommitTransaction(RtsTransaction tx, Unit spawnedUnit)
         {
+#if HORUS_CLIENT
+            if (HorusRemoteAuthority.IsRemoteSession) return;
+#endif
             if (CurrentMode != HorusMode.RtsCommander) return;
             if (tx == null || !tx.IsValid) return;
 
@@ -532,6 +607,9 @@ namespace HorusMod.Economy
         /// </summary>
         public void CommitGroupTransaction(RtsTransaction tx, List<Unit> spawnedUnits)
         {
+#if HORUS_CLIENT
+            if (HorusRemoteAuthority.IsRemoteSession) return;
+#endif
             if (CurrentMode != HorusMode.RtsCommander) return;
             if (tx == null || !tx.IsValid) return;
 
