@@ -42,9 +42,9 @@
     {
       "id": "release-assets",
       "platform": "packaging",
-      "status": "PENDING",
+      "status": "PASS",
       "evidence": "dist/SHA256SUMS.txt and dist/release-manifest.json",
-      "notes": "Regenerate after all tracked release files are finalized."
+      "notes": "The release gate rebuilds the three archives twice and requires byte-identical output and valid embedded manifests."
     }
   ]
 }

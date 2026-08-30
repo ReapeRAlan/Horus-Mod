@@ -20,7 +20,7 @@ This is implementation evidence, not the complete release acceptance report. It 
 - `Horus.Shared`, `Horus.Server`, and `Horus.Client` compile with zero warnings and zero errors.
 - `Horus.Server` compiles directly against `NuclearOptionServer_Data/Managed` from the official server app.
 - `Horus.Server` also compiles with zero warnings/errors against the official Linux depot's distinct `NuclearOptionServer_Data/Managed` assemblies. Decompiled IL for the Windows-reference and Linux-reference builds is identical across 36,855 lines; their raw PE hashes differ only in build metadata.
-- All 52 pure logic/protocol/security tests pass.
+- All 80 pure logic, protocol, security, paging, state, and audit tests pass.
 - BepInEx loads `Horus Dedicated Server 2.0.0`; Horus reports informational version `2.0.0-rc.1`.
 - The dedicated Mirage handler registers after server startup.
 - The empty SteamID64 allowlist loads as zero administrators (deny-all mutation policy).
@@ -30,6 +30,7 @@ This is implementation evidence, not the complete release acceptance report. It 
 - BepInEx loads `Horus Mod Starter 2.0.0`; the client reports informational version `2.0.0-rc.1` and the deployed DLL SHA-256 matches the build output.
 - A final client restart loads the complete economy and all six factory presets with `migration_lines=0` and `exception_error_lines=0`.
 - The GM, Dedicated, and Full ZIP layouts and embedded `SHA256SUMS` manifests validate, and a second packaging run produces byte-identical ZIP hashes.
+- The controlled two-minute Windows runtime check completed at `2026-08-30T23:55:02Z` with `fatalFindingCount=0`. Both required readiness markers (`Horus Dedicated Server` and `Waiting for Players before loading next map`) were present.
 
 ## Runtime findings fixed during the smoke
 
@@ -42,6 +43,7 @@ This is implementation evidence, not the complete release acceptance report. It 
 
 - Dedicated BepInEx log: `HorusDedicatedTest/server-win/BepInEx/LogOutput.log`.
 - Dedicated Unity logs: `HorusDedicatedTest/server-win/logs/horus_smoke_3.log` through `horus_smoke_5.log` and `horus_client_test.log`.
+- Controlled runtime bundle: `HorusDedicatedTest/server-win/runtime-evidence/windows/20260830-235302` (sanitized configuration, binary hashes, sampled process metrics, server log, BepInEx log, and `analysis.json`).
 - Final client BepInEx log: `BepInEx/LogOutput.log`.
 - Final client Unity log: `horus_client_factory_clean_2.log`.
 - RC packages: `NuclearOptionZeusMod/dist/Horus-*-v2.0.0-rc.1.zip`.
