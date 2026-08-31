@@ -332,6 +332,10 @@ internal static class Program
         Check("release assemblies do not embed the source commit identifier",
             deterministicBuildProps.Contains("<Deterministic>true</Deterministic>", StringComparison.Ordinal) &&
             deterministicBuildProps.Contains("<IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>", StringComparison.Ordinal) &&
+            deterministicBuildProps.Contains("<DebugType Condition=", StringComparison.Ordinal) &&
+            deterministicBuildProps.Contains(">none</DebugType>", StringComparison.Ordinal) &&
+            deterministicBuildProps.Contains("<DebugSymbols Condition=", StringComparison.Ordinal) &&
+            deterministicBuildProps.Contains(">false</DebugSymbols>", StringComparison.Ordinal) &&
             deterministicBuildProps.Contains("<SourceRevisionId Condition=", StringComparison.Ordinal) &&
             deterministicBuildProps.Contains("0000000000000000000000000000000000000000", StringComparison.Ordinal));
         string clientFactorySource = ReadRepoFile("src", "Economy", "RtsFactoryManager.cs");
