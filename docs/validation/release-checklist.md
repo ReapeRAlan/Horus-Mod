@@ -28,8 +28,10 @@ Record only observed results. Use `PASS`, `FAIL`, `PENDING`, or `BLOCKED`; never
 - [ ] Protocol mismatch fails closed.
 - [ ] Reconnect, mission change, stale revision, and snapshot resync.
 - [ ] Full mutation matrix and normal-client replication.
-- [ ] Abuse limits and four-hour soak.
-- [ ] Logs, audit, metrics, configuration hash, package hash, and screenshots retained.
+- [x] Exact frozen-DLL four-hour idle soak with clean shutdown and zero fatal findings.
+- [x] Runtime logs, metrics, sanitized configuration, and binary/configuration hashes retained.
+- [ ] Connected abuse limits.
+- [ ] Command audit evidence, final package hash, and GM screenshots retained.
 
 ## Linux official server
 
@@ -40,8 +42,10 @@ Record only observed results. Use `PASS`, `FAIL`, `PENDING`, or `BLOCKED`; never
 - [x] Public Workshop mission download, JSON resolution, `AfterLoad`, selection, and readiness.
 - [ ] Workshop gameplay with a connected client and two rotations.
 - [ ] Authorization, reconnect, resync, full mutation matrix, and native replication.
-- [ ] Abuse limits and four-hour soak.
-- [ ] Logs, audit, metrics, configuration hash, package hash, and screenshots retained.
+- [x] Exact frozen-DLL four-hour idle soak with clean shutdown and zero fatal findings.
+- [x] Runtime logs, metrics, configuration hash, and binary hashes retained.
+- [ ] Connected abuse limits.
+- [ ] Command audit evidence, final package hash, and GM screenshots retained.
 
 ## Known infrastructure limitation
 

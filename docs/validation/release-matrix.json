@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "version": "2.0.0-rc.1",
-  "updatedUtc": "2026-08-31T03:58:00Z",
+  "updatedUtc": "2026-08-31T08:35:00Z",
   "statuses": ["PASS", "FAIL", "PENDING", "BLOCKED"],
   "checks": [
     {
@@ -22,8 +22,15 @@
       "id": "windows-full-runtime",
       "platform": "windows",
       "status": "PENDING",
-      "evidence": "HorusDedicatedTest/server-win/runtime-evidence/windows-soak-launch/20260830-183236",
-      "notes": "The baseline four-hour soak is running. The exact stable RC smoke will run after the baseline exits because two concurrent official Windows server instances in one Steam session do not provide a valid certification environment. Connected Workshop gameplay, rotations, remote mutation matrix, reconnect, resync, and abuse remain unexecuted."
+      "evidence": "docs/validation/2026-08-31-exact-rc-runtime.md",
+      "notes": "Exact frozen-DLL Workshop smoke and four-hour idle headless soak passed with retained hashes/metrics, clean shutdown, and zero fatal findings. Connected Workshop gameplay, rotations, remote mutation matrix, reconnect, resync, abuse, and ordinary-client replication remain unexecuted."
+    },
+    {
+      "id": "windows-headless-soak",
+      "platform": "windows",
+      "status": "PASS",
+      "evidence": "docs/validation/2026-08-31-exact-rc-runtime.md and HorusDedicatedTest/server-win-workshop/runtime-evidence/windows-fixed-rc-soak/20260831-043451",
+      "notes": "The exact frozen Server/Shared DLLs completed a 240-minute Workshop idle soak: 1,438 samples, flat private memory, readiness observed, controlled shutdown, exact hashes, and zero fatal findings. This is not connected-gameplay evidence."
     },
     {
       "id": "linux-headless-smoke",
@@ -36,8 +43,15 @@
       "id": "linux-full-runtime",
       "platform": "linux-wsl2",
       "status": "PENDING",
-      "evidence": "/opt/horus/server-linux-workshop/runtime-evidence/linux-final-rc-soak/20260831-035606",
-      "notes": "The final exact-DLL smoke passed and a fresh four-hour soak is running with the frozen Server hash. Earlier exact-DLL soaks were intentionally stopped after security hardening changed Horus.Server.dll and are not counted as PASS. Connected Workshop gameplay, rotations, remote mutation matrix, reconnect, resync, abuse, and normal-client replication remain unexecuted."
+      "evidence": "docs/validation/2026-08-31-exact-rc-runtime.md",
+      "notes": "Exact frozen-DLL Workshop smoke and four-hour idle headless soak passed with retained hashes/metrics, clean shutdown, and zero fatal findings. Earlier partial soaks used superseded DLLs and are not counted. Connected Workshop gameplay, rotations, remote mutation matrix, reconnect, resync, abuse, and normal-client replication remain unexecuted."
+    },
+    {
+      "id": "linux-headless-soak",
+      "platform": "linux-wsl2",
+      "status": "PASS",
+      "evidence": "docs/validation/2026-08-31-exact-rc-runtime.md and /opt/horus/server-linux-workshop/runtime-evidence/linux-final-rc-soak/20260831-035606",
+      "notes": "The exact frozen Server/Shared DLLs completed a 240-minute Workshop idle soak: 1,440 samples, bounded non-monotonic RSS, readiness observed, controlled shutdown, exact hashes, and zero fatal findings. This is not connected-gameplay evidence."
     },
     {
       "id": "two-steam-identities",

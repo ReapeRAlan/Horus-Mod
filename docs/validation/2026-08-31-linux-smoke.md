@@ -2,7 +2,7 @@
 
 Date: 2026-08-31 UTC
 
-This report records observed Linux headless results. It does not convert the unexecuted multiplayer, Workshop, mutation, or soak scenarios into PASS results.
+This report records observed Linux headless results. It does not convert unexecuted multiplayer, connected Workshop gameplay, mutation, rotation, or abuse scenarios into PASS results. The later exact-artifact soak is summarized in [the exact-RC runtime report](2026-08-31-exact-rc-runtime.md).
 
 ## Environment
 
@@ -40,12 +40,11 @@ Unity emits unsupported-shader messages while using its null graphics device und
 - First successful run: `/opt/horus/server-linux/runtime-evidence/linux/20260831-004047`.
 - Clean restart: `/opt/horus/server-linux/runtime-evidence/linux/20260831-004409`.
 - Workshop download/selection: `/opt/horus/server-linux-workshop/runtime-evidence/linux/20260831-005211`.
-- Four-hour soak started separately and remains `PENDING` until its helper exits successfully.
+- Exact-artifact four-hour idle soak: `/opt/horus/server-linux-workshop/runtime-evidence/linux-final-rc-soak/20260831-035606` (PASS; 1,440 samples, frozen DLL hashes, zero fatal findings).
 
 ## Still pending
 
 - BuiltIn/Workshop gameplay with a connected client and completed mission rotations beyond server-side mission selection.
 - Allowlisted and denied real Steam GM sessions, ordinary client without Horus, protocol mismatch, reconnect, mission change, and resynchronization.
 - The complete mutation/replication/abuse matrix and visual GM evidence.
-- Completion and analysis of the four-hour Linux soak.
 - Two simultaneous GMs and two concurrent legitimate Steam identities.

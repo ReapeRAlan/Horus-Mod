@@ -2,7 +2,7 @@
 
 Date: 2026-08-29 to 2026-08-30 (America/Mexico_City)
 
-This is implementation evidence, not the complete release acceptance report. It records what was actually executed on this workstation and leaves unexecuted matrix items explicitly pending.
+This is historical implementation evidence, not the complete release acceptance report. It records what was executed on the stated dates and leaves unexecuted matrix items explicitly pending. Later Windows/Linux exact-artifact results are recorded in [the exact-RC runtime report](2026-08-31-exact-rc-runtime.md).
 
 ## Environment
 
@@ -13,7 +13,7 @@ This is implementation evidence, not the complete release acceptance report. It 
 - BepInEx: `5.4.22.0`, 64-bit Windows/Mono.
 - Server launch flags: `-batchmode -nographics`, hidden server, UDP test ports 17777/17778.
 - Dedicated Horus policy: `Enabled=true`, `ModdedServer=true`, empty administrator allowlist, mission-unit deletion disabled.
-- Official Linux depot: SteamCMD app `3930080` forced to platform `linux`; runtime execution unavailable on this workstation.
+- Official Linux depot: SteamCMD app `3930080` forced to platform `linux`; runtime execution was unavailable during this dated Windows report and was completed later under WSL 2.
 
 ## Passed checks
 
@@ -52,11 +52,11 @@ This is implementation evidence, not the complete release acceptance report. It 
 
 ## Still required before release
 
-- Linux official-server execution was not possible because WSL/Linux is not installed on this workstation. The official Linux depot/API compile passed, but headless startup, mission rotation, networking, and soak still require a real Linux host.
+- Later WSL 2 testing completed Linux headless startup/restart, Workshop selection, exact-artifact smoke, and an exact-artifact four-hour idle soak. Connected mission rotation and networking scenarios remain pending.
 - A real allowlisted Steam GM connection, denied GM, ordinary client without Horus, two simultaneous GMs, reconnect, mission change, incompatible protocol, and snapshot resync remain unexecuted.
 - The server selected BuiltIn and Workshop missions but did not load either map without a connected player; connected gameplay and two completed rotations remain pending.
 - The remote functional matrix (spawn, groups, Live Ordnance, orders, editing, safe delete, undo/redo, RTS, factories, and persistence observed by normal clients) remains pending.
-- Abuse testing and the four-hour soak remain pending.
-- Visual GM-client screenshots/video remain pending. The Windows automation helper could not run because the installed Node runtime was 22.17.1 while the helper required 22.22.0 or newer.
+- Connected abuse testing remains pending. Exact-artifact four-hour idle soaks later passed on Windows and Linux.
+- Visual GM-client screenshots/video remain pending. A later in-app automation attempt could not start its Windows sandbox (`CreateProcessWithLogonW failed: 2`), so no visual result was inferred.
 
 Do not tag, publish, or announce v2.0.0-rc.1 based only on this smoke report.
