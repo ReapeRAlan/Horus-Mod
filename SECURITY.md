@@ -15,6 +15,7 @@ Security fixes are applied to the newest supported line. A critical issue in an 
 - Deletion is limited to Horus-created entities unless the server operator deliberately changes the policy.
 - Orders and unit editing are limited to Horus-created entities unless `AllowMissionUnitMutation` is deliberately enabled. Deletion remains controlled by its separate setting.
 - Any invalid allowlist entry rejects the complete file. Rate limits and request deduplication are keyed by the authenticated SteamID64, not by a reconnectable network session.
+- Rejection auditing is independently rate-limited per valid SteamID64; UDP and invalid Steam sessions cannot amplify the JSONL audit file.
 - `Enabled = false` gates dedicated gameplay patches as well as command execution, preserving native server behavior.
 - The official TCP administration endpoint is not a Horus gameplay-control transport.
 

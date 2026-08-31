@@ -39,6 +39,7 @@ namespace HorusMod.Server
         public readonly HorusRequestDeduplicator Deduplicator = new HorusRequestDeduplicator();
         public HorusTokenBucket MutationRate;
         public HorusTokenBucket ReadRate;
+        public HorusTokenBucket RejectionAuditRate;
     }
 #endif
 }

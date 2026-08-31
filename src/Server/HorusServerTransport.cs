@@ -224,7 +224,7 @@ namespace HorusMod.Server
         {
             if(!principals.TryGetValue(steamId,out HorusServerPrincipalState principal))
             {
-                principal=new HorusServerPrincipalState{MutationRate=new HorusTokenBucket(10,20,now),ReadRate=new HorusTokenBucket(2,4,now)};
+                principal=new HorusServerPrincipalState{MutationRate=new HorusTokenBucket(10,20,now),ReadRate=new HorusTokenBucket(2,4,now),RejectionAuditRate=new HorusTokenBucket(2,10,now)};
                 principals[steamId]=principal;
             }
             return principal;
@@ -246,13 +246,14 @@ namespace HorusMod.Server
         private void SendReject(INetworkPlayer player,HorusCommandEnvelope command,HorusResultCode code,string message)
         {
             HorusCommandResult result=NewRejectedResult(command,code,message);Send(player,HorusPacketKind.CommandResult,result);
-            if(command!=null)audit.Write(TryAuthenticatedSteamId(player),CurrentMissionName(),command,result);
+            ulong steamId=TryAuthenticatedSteamId(player);double now=Time.realtimeSinceStartupAsDouble;
+            if(command!=null&&steamId!=0&&GetPrincipal(steamId,now).RejectionAuditRate.TryConsume(now))audit.Write(steamId,CurrentMissionName(),command,result);
         }
         private HorusCommandResult NewRejectedResult(HorusCommandEnvelope command,HorusResultCode code,string message)=>new HorusCommandResult{RequestId=command?.RequestId??Guid.Empty,Command=command?.Command??HorusCommandKind.None,Result=code,SessionId=state.SessionId,Revision=state.Revision,Message=HorusWireText.SanitizeVisible(message)};
         private void SendCurrentCapabilities(INetworkPlayer player,HorusServerClientState client,HorusResultCode code,string message)=>Send(player,HorusPacketKind.Capabilities,new HorusCapabilities{ServerVersion=HorusServerPlugin.PluginVersion,SessionId=state.SessionId,Revision=state.Revision,Features=HorusCapability.FullParity,Authorized=client!=null&&client.Authorized&&enabled(),Result=!enabled()?HorusResultCode.Disabled:code,Message=!enabled()?"Horus server is disabled.":HorusWireText.SanitizeVisible(message)});
         private static ulong TryAuthenticatedSteamId(INetworkPlayer player)
         {
-            if(player==null||!player.IsAuthenticated)return 0;NetworkAuthenticatorNuclearOption.AuthData auth=player.GetAuthData();return auth!=null&&auth.UsingSteamTransport?auth.SteamID.m_SteamID:0;
+            if(player==null||!player.IsAuthenticated)return 0;NetworkAuthenticatorNuclearOption.AuthData auth=player.GetAuthData();if(auth==null||!auth.UsingSteamTransport||!auth.SteamSessionOk)return 0;ulong steamId=auth.SteamID.m_SteamID;return HorusAdminAllowlist.IsIndividualSteamId64(steamId)?steamId:0;
         }
         private static void Send(INetworkPlayer player,HorusPacketKind kind,object value)
         {

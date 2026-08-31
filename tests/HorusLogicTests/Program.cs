@@ -403,8 +403,11 @@ internal static class Program
             serverTransportSource.Contains("client.HelloProtocolVersion=hello.ProtocolVersion", StringComparison.Ordinal) &&
             serverTransportSource.Contains("client.HelloProtocolVersion!=HorusProtocol.Version", StringComparison.Ordinal) &&
             !serverTransportSource.Contains("pair.Value.HelloReceived=true", StringComparison.Ordinal));
-        Check("structured command rejections are written to the audit journal",
-            serverTransportSource.Contains("if(command!=null)audit.Write", StringComparison.Ordinal));
+        Check("structured rejection auditing is bounded by trusted Steam principal",
+            serverTransportSource.Contains("RejectionAuditRate.TryConsume", StringComparison.Ordinal) &&
+            serverTransportSource.Contains("command!=null&&steamId!=0", StringComparison.Ordinal) &&
+            serverTransportSource.Contains("!auth.SteamSessionOk", StringComparison.Ordinal) &&
+            serverTransportSource.Contains("HorusAdminAllowlist.IsIndividualSteamId64", StringComparison.Ordinal));
         Check("stale state requests recover through a fresh capability session",
             serverTransportSource.Contains("request.SessionId!=state.SessionId", StringComparison.Ordinal) &&
             serverTransportSource.Contains("Mission session refreshed.", StringComparison.Ordinal));
