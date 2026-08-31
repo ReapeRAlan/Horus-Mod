@@ -71,9 +71,22 @@ try {
     }
 
     $matrix = Get-Content -LiteralPath $matrixPath -Raw -Encoding UTF8 | ConvertFrom-Json
-    foreach ($requiredCheck in @('automated-portable', 'windows-full-runtime', 'linux-full-runtime', 'release-assets')) {
+    foreach ($requiredCheck in @('automated-portable', 'windows-headless-soak', 'linux-headless-soak', 'release-assets')) {
         $check = @($matrix.checks | Where-Object { $_.id -eq $requiredCheck })
         if ($check.Count -ne 1 -or $check[0].status -ne 'PASS') { throw "Release-matrix check is not PASS: $requiredCheck" }
+    }
+    foreach ($pendingCheck in @('windows-full-runtime', 'linux-full-runtime')) {
+        $check = @($matrix.checks | Where-Object { $_.id -eq $pendingCheck })
+        if ($check.Count -ne 1 -or $check[0].status -ne 'PENDING') { throw "Test-RC connected-runtime check must be explicitly PENDING: $pendingCheck" }
+    }
+    $notes = Get-Content -LiteralPath $notesPath -Raw -Encoding UTF8
+    foreach ($warning in @('TEST RELEASE', 'EXPERIMENTAL PRERELEASE', 'NOT PRODUCTION-CERTIFIED', '## Pending')) {
+        if (-not $notes.Contains($warning)) { throw "Release notes are missing the mandatory test warning: $warning" }
+    }
+    $manualPath = Join-Path $repoRoot 'docs\user-manual.md'
+    $manual = Get-Content -LiteralPath $manualPath -Raw -Encoding UTF8
+    foreach ($warning in @('TEST RELEASE', 'EXPERIMENTAL PRERELEASE', 'NOT PRODUCTION-CERTIFIED', 'Still pending')) {
+        if (-not $manual.Contains($warning)) { throw "User manual is missing the mandatory test warning: $warning" }
     }
 
     $checksumRecords = @{}
@@ -105,7 +118,7 @@ try {
     }
 
     $assetPaths = @($assetNames | ForEach-Object { Join-Path $dist $_ })
-    Invoke-Gh (@('release', 'create', $Tag) + $assetPaths + @('--repo', $Repository, '--verify-tag', '--draft', '--prerelease', '--latest=false', '--fail-on-no-commits', '--title', "Horus $Tag", '--notes-file', $notesPath)) | Write-Host
+    Invoke-Gh (@('release', 'create', $Tag) + $assetPaths + @('--repo', $Repository, '--verify-tag', '--draft', '--prerelease', '--latest=false', '--fail-on-no-commits', '--title', "TEST RELEASE - Horus $Tag", '--notes-file', $notesPath)) | Write-Host
 
     $release = Invoke-Gh @('release', 'view', $Tag, '--repo', $Repository, '--json', 'tagName,isDraft,isPrerelease,isImmutable,assets') | ConvertFrom-Json
     if ($release.tagName -ne $Tag -or -not $release.isDraft -or -not $release.isPrerelease -or $release.isImmutable) {

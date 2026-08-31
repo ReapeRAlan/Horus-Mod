@@ -1,6 +1,6 @@
 # Horus on a dedicated Nuclear Option server
 
-Horus 2.0.0-rc.1 contains the dedicated-server architecture, protocol, authorization, audit trail, and packaging needed for validation. It is a release candidate, not a production-certified release: Windows and Linux runtime acceptance must pass before publishing 2.0.0.
+Horus 2.0.0-rc.1 contains the dedicated-server architecture, protocol, authorization, audit trail, and packaging needed for field validation. The RC is an experimental test prerelease, not a production-certified release. The complete connected Windows and Linux runtime matrix must pass before publishing stable 2.0.0.
 
 ## Package selection
 

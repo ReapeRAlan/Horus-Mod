@@ -11,6 +11,7 @@
 - Added daily sanitized JSONL audit logs with 14-day default retention and optional read-only Nuclei status/diagnostic commands.
 - Added reproducible, parameterized GM, Dedicated, and Full packages with embedded SHA-256 manifests and no automatic deployment.
 - Added a dedicated-server installation/security guide for the official Windows and Linux app and its required acceptance matrix.
+- Added a complete English user manual for GM clients, local hosts, dedicated operators, functional testing, troubleshooting, checksum verification, and rollback.
 - Added a single fail-fast release validator, public dependency-free CI, UTF-8/global-English checks, deterministic release sidecars, runtime evidence helpers, security policy, upgrade guide, troubleshooting guide, release checklist, and English prerelease notes.
 
 ### Security

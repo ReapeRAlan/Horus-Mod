@@ -116,6 +116,7 @@ function New-HorusPackage {
         Copy-PackageFile (Join-Path $repoRoot $document) (Join-Path $stageFull $document)
     }
     foreach ($document in @(
+        'docs\user-manual.md',
         'docs\dedicated-server.md',
         'docs\upgrade-from-v1.4.3.md',
         'docs\troubleshooting.md',

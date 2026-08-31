@@ -13,6 +13,7 @@ Record only observed results. Use `PASS`, `FAIL`, `PENDING`, or `BLOCKED`; never
 - [x] Release DLL hashes remain identical across a real commit change and forced revision identifiers.
 - [x] Runtime helpers enforce readiness and log-size safeguards while retaining failure evidence.
 - [x] ZIP contents and embedded `SHA256SUMS` validate.
+- [x] The complete English user manual is included in GM, Dedicated, and Full packages.
 - [x] No proprietary or generated DLL/ZIP is tracked by Git.
 
 ## Windows official server
@@ -64,3 +65,6 @@ Record only observed results. Use `PASS`, `FAIL`, `PENDING`, or `BLOCKED`; never
 - [ ] Re-run the preflight with `-CreateDraft` only after explicit publication approval; the script must verify all remote asset digests while the release remains a draft.
 - [ ] Upload three ZIPs, `SHA256SUMS.txt`, `release-manifest.json`, and English notes.
 - [ ] Verify every remote asset digest before publishing the draft.
+- [ ] Confirm the public title and first paragraph say TEST, experimental, and not production-certified.
+- [ ] Publish with prerelease enabled and Latest disabled; verify `v1.4.3` remains Latest/stable.
+- [ ] Confirm immutable-release protection after publication and never replace the tag or assets.
