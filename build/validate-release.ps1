@@ -160,6 +160,7 @@ try {
     Test-ScriptSyntax
 
     Write-Step 'Building portable contracts and running logic/security tests'
+    Invoke-Checked 'dotnet' @('restore', (Join-Path $repoRoot 'tests/HorusLogicTests/HorusLogicTests.csproj'), '--nologo')
     Invoke-Checked 'dotnet' @('build', (Join-Path $repoRoot 'Horus.Shared.csproj'), '-c', $Configuration, '--nologo', '-warnaserror')
     Invoke-Checked 'dotnet' @('run', '--project', (Join-Path $repoRoot 'tests/HorusLogicTests/HorusLogicTests.csproj'), '-c', $Configuration, '--no-restore')
 
