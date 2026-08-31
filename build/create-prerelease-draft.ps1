@@ -10,7 +10,7 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
 $repoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $version = $Tag.TrimStart('v')
-$notesPath = Join-Path $repoRoot "docs\releases\$version.md"
+$notesPath = Join-Path $repoRoot "docs\releases\$Tag.md"
 $dist = Join-Path $repoRoot 'dist'
 $manifestPath = Join-Path $dist 'release-manifest.json'
 $checksumsPath = Join-Path $dist 'SHA256SUMS.txt'

@@ -131,6 +131,9 @@ function Test-ScriptSyntax {
     $trackedBinaries = @(& git -c "safe.directory=$repoRoot" ls-files '*.dll' '*.zip')
     if ($trackedBinaries.Count -gt 0) { throw "Compiled or proprietary artifacts are tracked: $($trackedBinaries -join ', ')" }
     $draftScript = Get-Content -LiteralPath (Join-Path $repoRoot 'build/create-prerelease-draft.ps1') -Raw -Encoding UTF8
+    if (-not $draftScript.Contains('docs\releases\$Tag.md')) {
+        throw 'Prerelease notes must resolve from the exact version tag, including its v prefix.'
+    }
     foreach ($guard in @('--verify-tag', '--draft', '--prerelease', '--latest=false', '--fail-on-no-commits', 'CreateDraft')) {
         if (-not $draftScript.Contains($guard)) { throw "Prerelease draft safety guard is missing: $guard" }
     }
