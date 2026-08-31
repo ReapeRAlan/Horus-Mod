@@ -389,6 +389,12 @@ internal static class Program
                                   clientTransportSource.Contains(caseToken, StringComparison.Ordinal);
         }
         Check("every advertised command has server execution and client capability routing", everyCommandMapped);
+        Check("authoritative executor rejects invalid overloaded command shapes and enums",
+            serverExecutorSource.Contains("Duplicate accepts at most one position.", StringComparison.Ordinal) &&
+            serverExecutorSource.Contains("Source definition was not found in the authoritative catalog.", StringComparison.Ordinal) &&
+            serverExecutorSource.Contains("Enum.IsDefined(typeof(HorusMod.Placement.FormationKind)", StringComparison.Ordinal) &&
+            serverExecutorSource.Contains("Aircraft fuel must be between 0 and 1.", StringComparison.Ordinal) &&
+            serverExecutorSource.Contains("Aircraft livery is invalid.", StringComparison.Ordinal));
         Check("server rate limiting and deduplication are keyed by authenticated Steam principal",
             serverTransportSource.Contains("GetPrincipal(client.SteamId", StringComparison.Ordinal) &&
             serverTransportSource.Contains("principal.Deduplicator", StringComparison.Ordinal));

@@ -10,7 +10,7 @@ This report records observed results for the commit-independent `v2.0.0-rc.1` re
 - `Horus.Server.dll` SHA-256: `8db33fac0ef4c0b928fbdfb4e73742437fb9b3563c08ccbf1e0c43b646c9d1ad`.
 - `Horus.Shared.dll` SHA-256: `08825ce99b62936d324f713d806b6e0e19a544bc711c1962d378fd32f68b6db0`.
 - `Horus.Client.dll` SHA-256: `4e8f8d9541787caee90ebe788f834e4f0bf2c6f7129d6afbb78f0ff56f99c7c8`.
-- Clean-tree release gate: PASS with 137 tests, zero build errors, zero build warnings, headless dependency audit, two identical packaging runs, and valid embedded checksums.
+- Clean-tree release gate: PASS with 138 tests, zero build errors, zero build warnings, headless dependency audit, two identical packaging runs, and valid embedded checksums.
 - GitHub PR #3 checks on this source commit: `public-validation` PASS and GitGuardian PASS.
 
 ## Revision-independent reproducibility

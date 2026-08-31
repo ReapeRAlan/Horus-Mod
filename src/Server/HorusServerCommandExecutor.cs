@@ -137,7 +137,13 @@ namespace HorusMod.Server
             if (entry?.Def == null) { Reject(result, HorusResultCode.NotFound, "Definition was not found."); return; }
             if(payload.FloatValue<0f||payload.FloatValue>1f){Reject(result,HorusResultCode.InvalidPayload,"Skill must be between 0 and 1.");return;}
             bool aircraftEntry=entry.Def is AircraftDefinition||entry.Def.unitPrefab?.GetComponent<Aircraft>()!=null;
-            if(aircraftEntry&&(payload.FloatValue3<0f||payload.FloatValue3>1f)){Reject(result,HorusResultCode.InvalidPayload,"Aircraft bravery must be between 0 and 1.");return;}
+            if(aircraftEntry)
+            {
+                AircraftDefinition aircraftDefinition=entry.Def as AircraftDefinition;
+                if(payload.FloatValue2<0f||payload.FloatValue2>1f){Reject(result,HorusResultCode.InvalidPayload,"Aircraft fuel must be between 0 and 1.");return;}
+                if(payload.FloatValue3<0f||payload.FloatValue3>1f){Reject(result,HorusResultCode.InvalidPayload,"Aircraft bravery must be between 0 and 1.");return;}
+                if(aircraftDefinition?.aircraftParameters?.liveries==null||payload.IntValue<0||payload.IntValue>=aircraftDefinition.aircraftParameters.liveries.Count){Reject(result,HorusResultCode.InvalidPayload,"Aircraft livery is invalid.");return;}
+            }
             if(entry.IsLiveOrdnance&&(payload.FloatValue2<0f||payload.FloatValue2>100000f||payload.FloatValue3<-89f||payload.FloatValue3>89f)){Reject(result,HorusResultCode.InvalidPayload,"Live Ordnance launch parameters are out of range.");return;}
             if(!string.IsNullOrWhiteSpace(payload.UniqueName)&&UnitRegistry.customIDLookup.ContainsKey(payload.UniqueName)){Reject(result,HorusResultCode.InvalidPayload,"Unique name is already in use.");return;}
             string requestAcknowledgementKey=null;
@@ -217,7 +223,9 @@ namespace HorusMod.Server
         private void Duplicate(HorusCommandEnvelope command, HorusCommandResult result)
         {
             if (command.Payload.UnitIds.Count != 1 || !TryUnit(command.Payload.UnitIds[0], out Unit source)) { Reject(result, HorusResultCode.NotFound, "Source unit was not found."); return; }
+            if(command.Payload.Points.Count>1){Reject(result,HorusResultCode.InvalidPayload,"Duplicate accepts at most one position.");return;}
             UnitEntry entry=UnitCatalog.FindByDefinition(source.definition);
+            if(entry?.Def==null){Reject(result,HorusResultCode.NotFound,"Source definition was not found in the authoritative catalog.");return;}
             if(entry?.IsLiveOrdnance==true){Reject(result,HorusResultCode.PolicyDenied,"Live ordnance cannot be duplicated.");return;}
             UnitSnapshot snapshot=CaptureUnit(source);
             snapshot.Position=command.Payload.Points.Count==1?ResolveSpawnPosition(entry,ToGlobal(command.Payload.Points[0])):source.GlobalPosition()+new Vector3(20f,0f,20f);
@@ -249,13 +257,14 @@ namespace HorusMod.Server
         private void Move(HorusCommandEnvelope command, HorusCommandResult result)
         {
             if (command.Payload.Points.Count != 1) { Reject(result, HorusResultCode.InvalidPayload, "Move requires one destination."); return; }
+            if(!Enum.IsDefined(typeof(HorusMod.Placement.FormationKind),command.Payload.IntValue)){Reject(result,HorusResultCode.InvalidPayload,"Formation value is invalid.");return;}
             List<Unit> units = ResolveMutableUnits(command.Payload.UnitIds);
             List<GlobalPosition> before=units.Select(unit=>unit.GlobalPosition()).ToList();
             GlobalPosition destination=ToGlobal(command.Payload.Points[0]);
-            if (units.Count == 0 || !orders.IssueMove(units, ToGlobal(command.Payload.Points[0]), (HorusMod.Placement.FormationKind)Math.Max(0, command.Payload.IntValue)))
+            if (units.Count == 0 || !orders.IssueMove(units, ToGlobal(command.Payload.Points[0]), (HorusMod.Placement.FormationKind)command.Payload.IntValue))
             { Reject(result, HorusResultCode.NativeFailure, "No unit accepted the move order."); return; }
             AddIds(result, units); Accept(result, "Move order accepted.");
-            PushUndo(()=>ApplyDestinations(units,before),()=>orders.IssueMove(units,destination,(HorusMod.Placement.FormationKind)Math.Max(0,command.Payload.IntValue)));
+            PushUndo(()=>ApplyDestinations(units,before),()=>orders.IssueMove(units,destination,(HorusMod.Placement.FormationKind)command.Payload.IntValue));
         }
 
         private void Hold(HorusCommandEnvelope command, HorusCommandResult result) { List<Unit> units=ResolveMutableUnits(command.Payload.UnitIds); if(units.Count==0){Reject(result,HorusResultCode.PolicyDenied,"No controllable Horus-owned units were supplied.");return;} orders.SetHold(units,command.Payload.BoolValue);AddIds(result,units);Accept(result,"Hold state updated."); }
