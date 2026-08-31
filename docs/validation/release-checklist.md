@@ -55,6 +55,8 @@ Record only observed results. Use `PASS`, `FAIL`, `PENDING`, or `BLOCKED`; never
 - [x] Activate rulesets that require PR/CI for `main` and prevent update/deletion of `v*` tags.
 - [ ] Merge only after required CI succeeds.
 - [ ] Create an annotated tag on the exact merge commit.
+- [ ] Run `./build/create-prerelease-draft.ps1` and confirm its non-mutating preflight passes.
 - [ ] Create a draft prerelease with `--verify-tag --prerelease --latest=false --fail-on-no-commits`.
+- [ ] Re-run the preflight with `-CreateDraft` only after explicit publication approval; the script must verify all remote asset digests while the release remains a draft.
 - [ ] Upload three ZIPs, `SHA256SUMS.txt`, `release-manifest.json`, and English notes.
 - [ ] Verify every remote asset digest before publishing the draft.

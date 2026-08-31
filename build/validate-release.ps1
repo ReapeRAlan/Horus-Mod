@@ -109,7 +109,7 @@ function Test-VersionConsistency {
         $declared = @($xml.Project.PropertyGroup.Version | Where-Object { $_ })[0]
         if ($declared -ne $version) { throw "$project declares version '$declared' instead of '$version'." }
     }
-    foreach ($relative in @('package.ps1', 'src/HorusPlugin.cs', 'src/Server/HorusServerPlugin.cs', 'README.md', 'CHANGELOG.md')) {
+    foreach ($relative in @('package.ps1', 'build/create-prerelease-draft.ps1', 'src/HorusPlugin.cs', 'src/Server/HorusServerPlugin.cs', 'README.md', 'CHANGELOG.md')) {
         if ((Get-Content -LiteralPath (Join-Path $repoRoot $relative) -Raw -Encoding UTF8) -notmatch [regex]::Escape($version)) {
             throw "$relative does not reference $version."
         }
@@ -130,6 +130,13 @@ function Test-ScriptSyntax {
     }
     $trackedBinaries = @(& git -c "safe.directory=$repoRoot" ls-files '*.dll' '*.zip')
     if ($trackedBinaries.Count -gt 0) { throw "Compiled or proprietary artifacts are tracked: $($trackedBinaries -join ', ')" }
+    $draftScript = Get-Content -LiteralPath (Join-Path $repoRoot 'build/create-prerelease-draft.ps1') -Raw -Encoding UTF8
+    foreach ($guard in @('--verify-tag', '--draft', '--prerelease', '--latest=false', '--fail-on-no-commits', 'CreateDraft')) {
+        if (-not $draftScript.Contains($guard)) { throw "Prerelease draft safety guard is missing: $guard" }
+    }
+    foreach ($forbidden in @('gh release delete', 'gh release edit', '--latest=true', 'git push --force')) {
+        if ($draftScript.Contains($forbidden)) { throw "Unsafe prerelease operation found: $forbidden" }
+    }
 }
 
 function Test-PackageArchive {
