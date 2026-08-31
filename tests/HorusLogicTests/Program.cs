@@ -313,6 +313,16 @@ internal static class Program
         Check("server allowlist input is strict UTF-8 and size bounded",
             dedicatedPluginSource.Contains("new UTF8Encoding(false,true)", StringComparison.Ordinal) &&
             dedicatedPluginSource.Contains("Allowlist file is oversized", StringComparison.Ordinal));
+        string windowsRuntimeRunner = ReadRepoFile("build", "runtime", "run-windows-dedicated.ps1");
+        string linuxRuntimeRunner = ReadRepoFile("build", "runtime", "run-linux-dedicated.sh");
+        Check("Windows runtime validation fails closed on readiness timeout and log flooding",
+            windowsRuntimeRunner.Contains("ReadyTimeoutSeconds = 300", StringComparison.Ordinal) &&
+            windowsRuntimeRunner.Contains("MaxLogBytes = 16777216", StringComparison.Ordinal) &&
+            windowsRuntimeRunner.Contains("runtime-status.json", StringComparison.Ordinal));
+        Check("Linux runtime validation fails closed on readiness timeout and log flooding",
+            linuxRuntimeRunner.Contains("HORUS_READY_TIMEOUT_SECONDS:-300", StringComparison.Ordinal) &&
+            linuxRuntimeRunner.Contains("HORUS_MAX_LOG_BYTES:-16777216", StringComparison.Ordinal) &&
+            linuxRuntimeRunner.Contains("runtime-status.json", StringComparison.Ordinal));
         string clientFactorySource = ReadRepoFile("src", "Economy", "RtsFactoryManager.cs");
         Check("local factories use authoritative transactions and atomic persistence replacement",
             clientFactorySource.Contains("CreateTransaction(def, factory.factionId)", StringComparison.Ordinal) &&
