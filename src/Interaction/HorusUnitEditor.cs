@@ -1,6 +1,10 @@
 using HorusMod.Logging;
 using HorusMod.Loadouts;
 using HorusMod.Networking;
+#if HORUS_CLIENT
+using HorusMod.Client;
+using HorusMod.Shared;
+#endif
 
 namespace HorusMod.Interaction
 {
@@ -13,6 +17,14 @@ namespace HorusMod.Interaction
 
         public static LoadoutApplyResult TrySetLoadoutDetailed(Aircraft aircraft, int presetIndex)
         {
+#if HORUS_CLIENT
+            if (HorusRemoteAuthority.IsRemoteSession && aircraft != null)
+            {
+                var payload=new HorusCommandPayload{SecondaryKey="standard",IntValue=presetIndex};payload.UnitIds.Add(aircraft.persistentID.Id);
+                bool sent=HorusRemoteAuthority.TrySubmit(HorusCommandKind.SetLoadout,payload);
+                return new LoadoutApplyResult(sent?LoadoutApplyStatus.Success:LoadoutApplyStatus.NotAuthorized,sent?"Dedicated loadout request sent":HorusRemoteAuthority.Status,null,aircraft.NetworkfuelLevel,-1);
+            }
+#endif
             LoadoutApplyResult result = HorusLoadoutService.ApplyStandardPreset(aircraft, presetIndex);
             if (!result.Success)
                 HorusLog.Verbose("UnitEditor", $"Loadout preset {presetIndex} was not applied: {result.Message}");
@@ -21,6 +33,15 @@ namespace HorusMod.Interaction
 
         public static LoadoutApplyResult TrySetLoadout(Aircraft aircraft, LoadoutDraft draft)
         {
+#if HORUS_CLIENT
+            if (HorusRemoteAuthority.IsRemoteSession && aircraft != null && draft != null)
+            {
+                var payload=new HorusCommandPayload{FloatValue=draft.FuelRatio,IntValue=draft.LiveryIndex};
+                payload.UnitIds.Add(aircraft.persistentID.Id);payload.MountKeys.AddRange(draft.WeaponMountJsonKeys);
+                bool sent=HorusRemoteAuthority.TrySubmit(HorusCommandKind.SetLoadout,payload);
+                return new LoadoutApplyResult(sent?LoadoutApplyStatus.Success:LoadoutApplyStatus.NotAuthorized,sent?"Dedicated loadout request sent":HorusRemoteAuthority.Status,null,draft.FuelRatio,draft.LiveryIndex);
+            }
+#endif
             LoadoutApplyResult result = HorusLoadoutService.ApplyToAircraft(aircraft, draft);
             if (!result.Success)
                 HorusLog.Verbose("UnitEditor", $"Custom loadout was not applied: {result.Message}");
@@ -29,6 +50,9 @@ namespace HorusMod.Interaction
 
         public static bool TrySetLivery(Aircraft aircraft, int index)
         {
+#if HORUS_CLIENT
+            if (HorusRemoteAuthority.IsRemoteSession && aircraft != null) { var payload=new HorusCommandPayload{IntValue=index};payload.UnitIds.Add(aircraft.persistentID.Id);return HorusRemoteAuthority.TrySubmit(HorusCommandKind.SetLivery,payload); }
+#endif
             if (!HorusPermissions.CanSpawn() || aircraft == null) return false;
             AircraftDefinition definition = aircraft.definition as AircraftDefinition;
             AircraftParameters parameters = definition != null ? definition.aircraftParameters : null;
@@ -39,6 +63,9 @@ namespace HorusMod.Interaction
 
         public static void SetSkill(Unit unit, float skill)
         {
+#if HORUS_CLIENT
+            if (HorusRemoteAuthority.IsRemoteSession && unit != null) { var payload=new HorusCommandPayload{FloatValue=skill};payload.UnitIds.Add(unit.persistentID.Id);HorusRemoteAuthority.TrySubmit(HorusCommandKind.SetSkill,payload);return; }
+#endif
             if (!HorusPermissions.CanSpawn() || unit == null) return;
             skill = UnityEngine.Mathf.Clamp01(skill);
             if (unit is Aircraft aircraft)

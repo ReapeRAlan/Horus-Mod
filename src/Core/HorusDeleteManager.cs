@@ -4,6 +4,10 @@ using Mirage;
 using System.Collections.Generic;
 using HorusMod.UI;
 using HorusMod.Logging;
+#if HORUS_CLIENT
+using HorusMod.Client;
+using HorusMod.Shared;
+#endif
 
 namespace HorusMod.Core
 {
@@ -12,7 +16,11 @@ namespace HorusMod.Core
         public static void HandleDeleteClick(bool mapSpawnMode, float deleteRange, HashSet<Unit> horusSpawnedUnits)
         {
             // Permission gate.
-            if (!Networking.HorusPermissions.CanDelete())
+            bool remoteAuthorized = false;
+#if HORUS_CLIENT
+            remoteAuthorized = HorusRemoteAuthority.IsRemoteSession && HorusRemoteAuthority.IsAuthorized;
+#endif
+            if (!remoteAuthorized && !Networking.HorusPermissions.CanDelete())
             {
                 HorusLog.Warning("Delete", "Horus: host permission required. Delete blocked.");
                 return;
@@ -63,7 +71,7 @@ namespace HorusMod.Core
             }
 
             // Validate the unit
-            if (!HorusManager.Instance.IsSafeDeleteTarget(unitToDelete.gameObject))
+            if (!remoteAuthorized && !HorusManager.Instance.IsSafeDeleteTarget(unitToDelete.gameObject))
             {
                 string reason = "";
                 if (HorusManager.IsBuiltinMapUnit(unitToDelete))
@@ -84,6 +92,16 @@ namespace HorusMod.Core
         public static void DeleteUnit(Unit unit, HashSet<Unit> horusSpawnedUnits)
         {
             if (unit == null) return;
+#if HORUS_CLIENT
+            if (HorusRemoteAuthority.IsRemoteSession)
+            {
+                var payload = new HorusCommandPayload();
+                payload.UnitIds.Add(unit.persistentID.Id);
+                if (!HorusRemoteAuthority.TrySubmit(HorusCommandKind.Delete, payload))
+                    HorusToasts.Show("Delete rejected: " + HorusRemoteAuthority.Status);
+                return;
+            }
+#endif
             GameObject go = unit.gameObject;
             string unitName = unit.unitName;
             

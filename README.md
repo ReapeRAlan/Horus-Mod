@@ -3,7 +3,7 @@
 A Game Master/Free Camera utility mod for Nuclear Option (formerly known as Zeus Mod). Horus allows the host or local player to spawn aircraft, vehicles, ships, and buildings in real time.
 
 > [!NOTE]
-> The v1.4.3 capabilities documented below are published as of this release. Lookup-only content, live ordnance, mod-provided definitions, naval resupply, and corrected AI bombing remain experimental until they pass further in-game validation.
+> **TEST RELEASE — EXPERIMENTAL PRERELEASE — NOT PRODUCTION-CERTIFIED.** v1.4.3 remains the recommended stable release. v2.0.0-rc.1 is for dedicated-server field testing: automated validation and Windows/Linux headless soaks pass, while the documented connected-gameplay matrix remains pending. Lookup-only content, live ordnance, mod-provided definitions, naval resupply, and corrected AI bombing remain experimental where noted.
 
 ## Features
 - Toggle Horus Mode (Free Camera + UI) with **F9**.
@@ -39,7 +39,7 @@ A Game Master/Free Camera utility mod for Nuclear Option (formerly known as Zeus
 - **RTS / Budget Mode**: uses each unit's native `UnitDefinition.value`, with optional stable `jsonKey` overrides and a global multiplier in `BepInEx/config/HorusMod/rts_economy.json`.
 - **RTS Factories & Production**: host-created visible factory buildings that generate income, loop production queues, use type-correct spawn rules, support rally points, and persist to JSON.
 - **Host-authoritative multiplayer**: clients are blocked by default and the UI shows the current permission status. Normal players do not need the mod installed, and if they do, they are locked to view-only mode. All spawn, delete, and budget modifications are validated server-side.
-- **Single-player / local-host authority**: all mutating editor actions are gated; dedicated/headless server control is not part of this release.
+- **Single-player, local-host, and dedicated authority**: all mutating editor actions use an authoritative gateway. Dedicated control authenticates a normal Steam player against a server-side SteamID64 allowlist and fails closed by default.
 - **Camera/Control Restore**: saves and restores aircraft control, camera, cursor lock, and cursor visibility states. Focus loss and scene changes release Horus pointer capture safely.
 
 ## Installation
@@ -47,9 +47,22 @@ A Game Master/Free Camera utility mod for Nuclear Option (formerly known as Zeus
 > If you are updating from an older version, please **DELETE `NuclearOptionZeusMod.dll`** from your plugins folder first to prevent conflicts.
 
 1. Install [BepInEx 5](https://github.com/BepInEx/BepInEx) for Nuclear Option.
-2. Download the latest release `.zip` from the GitHub Releases page.
-3. Extract the contents into your `Nuclear Option/` directory. The structure should be:
-   `Nuclear Option/BepInEx/plugins/HorusMod/HorusMod.dll`
+2. Choose the package for the machine:
+   - `Horus-GM-v2.0.0-rc.1.zip`: `Horus.Shared.dll` + `Horus.Client.dll` for a dedicated Game Master client.
+   - `Horus-Dedicated-v2.0.0-rc.1.zip`: `Horus.Shared.dll` + `Horus.Server.dll` for the official headless server.
+   - `Horus-Full-v2.0.0-rc.1.zip`: all three assemblies for single player or a local host.
+3. Extract the package into the game or server root. Assemblies install under `BepInEx/plugins/Horus/`.
+4. Dedicated operators must follow [the dedicated-server guide](docs/dedicated-server.md), set BepInEx `HideManagerGameObject = true`, enable `ModdedServer`, create the SteamID64 allowlist, and deliberately set `Enabled = true` in `Horus.Server.cfg`.
+
+### Documentation
+
+- [Complete user manual](docs/user-manual.md)
+- [Dedicated server: Windows, Linux, and WSL](docs/dedicated-server.md)
+- [Upgrade from v1.4.3](docs/upgrade-from-v1.4.3.md)
+- [Troubleshooting](docs/troubleshooting.md)
+- [Security policy](SECURITY.md)
+- [v2.0.0-rc.1 release notes](docs/releases/v2.0.0-rc.1.md)
+- [Release validation checklist](docs/validation/release-checklist.md)
 
 ## Controls
 - **F9** (configurable): Toggle Horus Mode
@@ -181,8 +194,8 @@ Factories, bases, or carriers automatically generate income and produce units ov
 - **Queue Loop**: Add units or compatible buildings to a factory's queue; it loops through the production list automatically. If budget or unit cap is insufficient, production pauses and reports the reason.
 - **Rally Points**: Set a rally point using targeted aim. Produced ground, naval, and AI air units receive a real movement order after spawning.
 - **Playable Factions**: Factories require a real faction with an active HQ. Neutral remains available for Sandbox unit placement but is rejected for factories with an explicit status instead of an index error.
-- **Config Migration**: Incomplete older economy/factory JSON files are filled with current defaults (including working production queues) and saved automatically.
-- **Persistent Instances**: Factory presets are saved in `BepInEx/config/HorusMod/rts_factories.json`; placed factory instances are saved in `BepInEx/config/HorusMod/rts_factory_instances.json`.
+- **Config Migration**: Compatible incomplete economy/factory JSON files are filled with current defaults and saved automatically. Invalid, oversized, non-finite, or unsupported files are rejected and replaced with bounded defaults.
+- **Persistent Instances**: Local/listen-host factory presets and instances use `rts_factories.json` and `rts_factory_instances.json`. Dedicated presets and instances use the isolated `rts_factories_server_config.json` and `rts_factories_server.json` files in `BepInEx/config/HorusMod/`.
 - **Economy Config**: Budgets, passive income, caps, and costs are saved in `BepInEx/config/HorusMod/rts_economy.json`. Global passive income is optional and lower than factory income in default configs.
 - **How to Create Factories**:
   1. Under the **RTS Factories & Production** panel, select a preset (e.g. Ground Vehicle Factory).
@@ -197,14 +210,16 @@ Factories, bases, or carriers automatically generate income and produce units ov
 - **Multiplayer Safety**: Creation, deletion, editing, queue updates, production ticks, budget changes, save/load, reload, and reset actions are restricted to Single Player or Multiplayer Host. Clients can view safe UI state and see Host-only indicators.
 
 ### Multiplayer Permissions
-Horus is host-authoritative. Normal players do not need Horus Mod installed to play on a server hosted by a Game Master using Horus Mod. 
+Horus is server-authoritative. Normal players do not need Horus installed when the Game Master uses native Nuclear Option content. Third-party content definitions still require matching asset mods on every machine that must simulate or render them.
 
 If you do have Horus installed, the UI shows your current mode:
 - **Single Player** — full access.
 - **Multiplayer Host** — full access.
 - **Client (View Only)** — spawning, deleting, and budget adjustments are blocked by default.
 
-Dedicated/headless command transport is intentionally out of scope for v1.4.3. Horus currently supports single player and local-host authority only; installing the current DLL on a dedicated server does not provide a remote Game Master interface. The planned server design uses a headless-safe runtime, authenticated SteamID allowlist, versioned Mirage messages, rate limits, deduplication, server-side validation, and audit logs. Nuclear Option's loopback server-command TCP endpoint will not be reused as an unauthenticated gameplay-control channel. See [ROADMAP.md](ROADMAP.md) for the staged design.
+- **Dedicated Server GM** - full remote access only after authenticated SteamID64 allowlist approval.
+
+The v2.0.0-rc.1 dedicated transport uses versioned Mirage messages, manually registered bounded serializers, per-SteamID request deduplication and rate limits, authoritative catalog/position/loadout/cost validation, validated revisioned snapshots, original-unit mutation policies, and JSONL audit logs. The allowlist is empty, any invalid allowlist entry rejects the complete file, and `Horus.Server.cfg` is disabled by default. Nuclear Option's loopback server-command TCP endpoint is not used as a gameplay-control channel. See [the dedicated-server guide](docs/dedicated-server.md) for installation, security, and the mandatory release-candidate test matrix.
 
 ### Map Spawn Mode
 1. Enable **Map Spawn: ON** in the Horus window (this also opens the map).
@@ -215,13 +230,31 @@ Dedicated/headless command transport is intentionally out of scope for v1.4.3. H
 
 ## Troubleshooting
 - **"F9 does nothing"**: Verify BepInEx 5 is installed correctly and `LogOutput.log` shows Horus Mod Starter loaded. Check if another mod uses F9. You can change the hotkeys using BepInEx Configuration Manager.
-- **"Cannot spawn units"**: In multiplayer, only the Host can spawn or delete units.
+- **"Cannot spawn units"**: A local multiplayer client is view-only. On a dedicated server, the GM must complete the matching protocol handshake through an authenticated Steam connection and appear in the server-side SteamID64 allowlist.
 - **"Ctrl/Alt + Scroll does nothing"**: The shortcuts read the game's mouse-wheel (Rewired "Zoom View") input. If the direction feels reversed, set `Placement / InvertScrollDirection = true` in the BepInEx config.
 - **"Middle click won't delete a unit"**: By design, only units spawned by Horus are deletable. See **Safe Delete** above.
 - **"My aircraft has no standard loadouts"**: Try **Custom Hardpoints**. Some aircraft, especially mod aircraft, expose compatible hardpoint sets but no `StandardLoadouts`; others have fixed or incomplete weapon data and cannot be edited safely.
 - **"A mod aircraft or `???` is missing"**: Click **Refresh Catalog**. If it appears only as `Lookup Only`, spawning requires **Force incompatible content** and its per-session warning; this does not guarantee multiplayer compatibility.
 - **"The naval supply object does not rearm my ship"**: Check `Can resupply ships`. `unknown` means the prefab has not been functionally verified, while `no` means no naval `Rearmer` capability was detected. Storage or decorative containers do not automatically supply ammunition.
-- **"Can Horus control a dedicated server?"**: Not yet. v1.4.3 has no supported headless admin transport; use Horus only in single player or as the local multiplayer host.
+- **"Can Horus control a dedicated server?"**: The v2.0.0-rc.1 packages implement it for validation. It is not a production-certified release until the documented Windows and Linux runtime matrix passes. Use the dedicated package on the server, the GM package on the allowlisted Steam player's client, and follow [the dedicated-server guide](docs/dedicated-server.md).
+
+For additional diagnostics and safe rollback instructions, see [Troubleshooting](docs/troubleshooting.md).
+
+## Validation from source
+
+Public CI and contributors can run the portable checks without proprietary game assemblies:
+
+```powershell
+./build/validate-release.ps1 -PublicCi
+```
+
+Maintainers with legitimate local client and dedicated-server installations run the complete build, dependency audit, deterministic packaging, checksum, English/UTF-8, and repository gate:
+
+```powershell
+./build/validate-release.ps1
+```
+
+Runtime helpers and their evidence behavior are documented in [build/runtime/README.md](build/runtime/README.md). Compiled Nuclear Option, Unity, Steam, Mirage, Rewired, BepInEx, and other proprietary dependencies are never committed or uploaded as CI artifacts.
 
 ## Compatibility
 Compatible with NOMM/NOMNOM mod managers.

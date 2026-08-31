@@ -4,11 +4,15 @@
     <TargetFramework>net8.0</TargetFramework>
     <ImplicitUsings>disable</ImplicitUsings>
     <Nullable>disable</Nullable>
+    <DefineConstants>HORUS_LOGIC_TESTS</DefineConstants>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Remove="obj\**\*.cs" />
+    <ProjectReference Include="..\..\Horus.Shared.csproj" />
     <Compile Include="..\..\src\Interaction\RmbGestureClassifier.cs" Link="RmbGestureClassifier.cs" />
     <Compile Include="..\..\src\Interaction\ContextMenuPointerPolicy.cs" Link="ContextMenuPointerPolicy.cs" />
     <Compile Include="..\..\src\Interaction\HorusTacticalTypes.cs" Link="HorusTacticalTypes.cs" />
     <Compile Include="..\..\src\Spawning\HorusOrdnanceTargeting.cs" Link="HorusOrdnanceTargeting.cs" />
+    <Compile Include="..\..\src\Server\HorusServerState.cs" Link="HorusServerState.cs" />
   </ItemGroup>
 </Project>

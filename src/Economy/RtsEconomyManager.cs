@@ -1,7 +1,13 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using UnityEngine;
+using HorusMod.Shared;
+using HorusMod.Data;
+#if HORUS_CLIENT
+using HorusMod.Client;
+#endif
 using HorusMod.Networking;
 using HorusMod.Logging;
 
@@ -18,8 +24,38 @@ namespace HorusMod.Economy
         public static RtsEconomyManager Instance { get; private set; }
 
         // ─── Current Mode ────────────────────────────────────────────────────────
-        public HorusMode CurrentMode { get; set; } = HorusMode.Sandbox;
-        public RtsDeployMode DeployMode { get; set; } = RtsDeployMode.FreePlacementPaid;
+        private HorusMode currentMode = HorusMode.Sandbox;
+        private RtsDeployMode deployMode = RtsDeployMode.FreePlacementPaid;
+        public HorusMode CurrentMode
+        {
+            get => currentMode;
+            set
+            {
+#if HORUS_CLIENT
+                if (HorusRemoteAuthority.IsRemoteSession && !HorusClientTransport.ApplyingSnapshot)
+                {
+                    HorusRemoteAuthority.TrySubmit(HorusCommandKind.SetRtsMode,new HorusCommandPayload{IntValue=(int)value});
+                    return;
+                }
+#endif
+                currentMode = value;
+            }
+        }
+        public RtsDeployMode DeployMode
+        {
+            get => deployMode;
+            set
+            {
+#if HORUS_CLIENT
+                if (HorusRemoteAuthority.IsRemoteSession && !HorusClientTransport.ApplyingSnapshot)
+                {
+                    HorusRemoteAuthority.TrySubmit(HorusCommandKind.SetRtsDeployMode,new HorusCommandPayload{IntValue=(int)value});
+                    return;
+                }
+#endif
+                deployMode = value;
+            }
+        }
 
         // ─── Config ──────────────────────────────────────────────────────────────
         private RtsEconomyConfig config;
@@ -60,14 +96,17 @@ namespace HorusMod.Economy
                 if (!System.IO.File.Exists(ConfigPath))
                 {
                     config = CreateDefaultConfig();
-                    string json = JsonUtility.ToJson(config, true);
+                    string json = SerializeConfig(config);
                     System.IO.File.WriteAllText(ConfigPath, json);
                     HorusLog.Info("Economy", $"[RTS Economy] Created default config at {ConfigPath}");
                 }
                 else
                 {
+                    long configLength = new System.IO.FileInfo(ConfigPath).Length;
+                    if (configLength < 0 || configLength > HorusEconomyPolicy.MaxConfigFileBytes)
+                        throw new InvalidDataException($"RTS economy config exceeds {HorusEconomyPolicy.MaxConfigFileBytes} bytes");
                     string json = System.IO.File.ReadAllText(ConfigPath);
-                    config = JsonUtility.FromJson<RtsEconomyConfig>(json);
+                    config = DeserializeConfig(json);
                     if (config == null) throw new Exception("Parsed config is null");
                     HorusLog.Info("Economy", $"[RTS Economy] Loaded config from {ConfigPath}");
                 }
@@ -100,29 +139,86 @@ namespace HorusMod.Economy
 
             bool changed = false;
             RtsEconomyConfig defaults = CreateDefaultConfig();
-            if (config.incomeTickSeconds < 1f)
+            if (!HorusEconomyPolicy.IsValidTickSeconds(config.incomeTickSeconds))
             {
                 config.incomeTickSeconds = defaults.incomeTickSeconds;
                 changed = true;
             }
-            if (config.unitCostMultiplier <= 0f)
+            if (!HorusEconomyPolicy.IsValidMultiplier(config.unitCostMultiplier))
             {
                 config.unitCostMultiplier = defaults.unitCostMultiplier;
                 changed = true;
             }
-            if (config.factionBudgets == null || config.factionBudgets.Count == 0)
+
+            var normalizedBudgets = new List<FactionBudgetEntry>();
+            var budgetNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (config.factionBudgets != null)
+            {
+                foreach (FactionBudgetEntry entry in config.factionBudgets)
+                {
+                    if (normalizedBudgets.Count >= HorusEconomyPolicy.MaxConfigEntries || entry == null ||
+                        string.IsNullOrWhiteSpace(entry.factionName) || !HorusWireText.IsStableKey(entry.factionName) ||
+                        !HorusEconomyPolicy.IsValidBudget(entry.startingBudget) || !HorusEconomyPolicy.IsValidIncome(entry.incomePerTick) ||
+                        !HorusEconomyPolicy.IsValidUnitCap(entry.unitCap) || !budgetNames.Add(entry.factionName))
+                    {
+                        changed = true;
+                        continue;
+                    }
+                    normalizedBudgets.Add(entry);
+                }
+            }
+            if (normalizedBudgets.Count == 0)
             {
                 config.factionBudgets = defaults.factionBudgets;
                 changed = true;
             }
+            else if (config.factionBudgets == null || normalizedBudgets.Count != config.factionBudgets.Count)
+            {
+                config.factionBudgets = normalizedBudgets;
+            }
+
             if (config.categoryCosts == null)
             {
                 config.categoryCosts = new List<CategoryCostEntry>();
                 changed = true;
             }
-            if (config.unitCostOverrides == null)
+            else
             {
-                config.unitCostOverrides = new List<UnitCostOverride>();
+                var normalizedCategories = new List<CategoryCostEntry>();
+                var categoryNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (CategoryCostEntry entry in config.categoryCosts)
+                {
+                    if (normalizedCategories.Count >= HorusEconomyPolicy.MaxConfigEntries || entry == null ||
+                        string.IsNullOrWhiteSpace(entry.category) || !HorusWireText.IsStableKey(entry.category) ||
+                        !HorusEconomyPolicy.IsValidUnitCost(entry.fallbackCost) || !categoryNames.Add(entry.category))
+                    {
+                        changed = true;
+                        continue;
+                    }
+                    normalizedCategories.Add(entry);
+                }
+                if (normalizedCategories.Count != config.categoryCosts.Count) config.categoryCosts = normalizedCategories;
+            }
+
+            var normalizedOverrides = new List<UnitCostOverride>();
+            var overrideKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (config.unitCostOverrides != null)
+            {
+                foreach (UnitCostOverride entry in config.unitCostOverrides)
+                {
+                    if (normalizedOverrides.Count >= HorusEconomyPolicy.MaxConfigEntries || entry == null ||
+                        string.IsNullOrWhiteSpace(entry.jsonKey) || !HorusWireText.IsStableKey(entry.jsonKey) ||
+                        !HorusEconomyPolicy.IsValidUnitCost(entry.cost) || !overrideKeys.Add(entry.jsonKey))
+                    {
+                        changed = true;
+                        continue;
+                    }
+                    normalizedOverrides.Add(entry);
+                }
+            }
+            if (config.unitCostOverrides == null || normalizedOverrides.Count != config.unitCostOverrides.Count)
+            {
+                config.unitCostOverrides = normalizedOverrides;
                 changed = true;
             }
             return changed;
@@ -135,9 +231,8 @@ namespace HorusMod.Economy
             {
                 foreach (var entry in config.unitCostOverrides)
                 {
-                    string key = !string.IsNullOrWhiteSpace(entry.jsonKey) ? entry.jsonKey : entry.unitName;
-                    if (!string.IsNullOrWhiteSpace(key))
-                        unitCostLookup[key] = entry.cost;
+                    if (entry != null && !string.IsNullOrWhiteSpace(entry.jsonKey) && HorusEconomyPolicy.IsValidUnitCost(entry.cost))
+                        unitCostLookup[entry.jsonKey] = entry.cost;
                 }
             }
 
@@ -149,7 +244,7 @@ namespace HorusMod.Economy
             {
                 if (config != null)
                 {
-                    string json = JsonUtility.ToJson(config, true);
+                    string json = SerializeConfig(config);
                     System.IO.File.WriteAllText(ConfigPath, json);
                 }
             }
@@ -157,6 +252,17 @@ namespace HorusMod.Economy
             {
                 HorusLog.Error("Economy", $"[RTS Economy] Config save failed: {ex.Message}");
             }
+        }
+
+        private static string SerializeConfig(RtsEconomyConfig value)
+        {
+            return Newtonsoft.Json.JsonConvert.SerializeObject(value, Newtonsoft.Json.Formatting.Indented);
+        }
+
+        private static RtsEconomyConfig DeserializeConfig(string json)
+        {
+            return Newtonsoft.Json.JsonConvert.DeserializeObject<RtsEconomyConfig>(json,
+                new Newtonsoft.Json.JsonSerializerSettings { MaxDepth = 32 });
         }
 
         private static RtsEconomyConfig CreateDefaultConfig()
@@ -197,9 +303,9 @@ namespace HorusMod.Economy
                 var state = new FactionEconomyState
                 {
                     FactionName = fname,
-                    Budget = budgetEntry?.startingBudget ?? 5000f,
-                    IncomePerTick = budgetEntry?.incomePerTick ?? 50f,
-                    UnitCap = budgetEntry?.unitCap ?? 30,
+                    Budget = budgetEntry != null && HorusEconomyPolicy.IsValidBudget(budgetEntry.startingBudget) ? budgetEntry.startingBudget : 5000f,
+                    IncomePerTick = budgetEntry != null && HorusEconomyPolicy.IsValidIncome(budgetEntry.incomePerTick) ? budgetEntry.incomePerTick : 50f,
+                    UnitCap = budgetEntry != null && HorusEconomyPolicy.IsValidUnitCap(budgetEntry.unitCap) ? budgetEntry.unitCap : 30,
                     ActiveUnitCount = 0
                 };
                 factionStates[i] = state;
@@ -235,6 +341,13 @@ namespace HorusMod.Economy
 
         public void Tick()
         {
+#if HORUS_CLIENT
+            if (HorusRemoteAuthority.IsRemoteSession)
+            {
+                if (HorusPermissions.InMission() && !matchInitialized) InitializeMatch();
+                return;
+            }
+#endif
             if (CurrentMode != HorusMode.RtsCommander) return;
 
             // If we are not in a mission, reset match economy and return
@@ -259,7 +372,16 @@ namespace HorusMod.Economy
                 lastIncomeTickTime = Time.time;
                 foreach (var kvp in factionStates)
                 {
-                    kvp.Value.Budget += kvp.Value.IncomePerTick;
+                    if (HorusEconomyPolicy.TryAddBudget(kvp.Value.Budget, kvp.Value.IncomePerTick, out float nextBudget))
+                        kvp.Value.Budget = nextBudget;
+                    else if (HorusEconomyPolicy.IsValidBudget(kvp.Value.Budget) && HorusEconomyPolicy.IsValidIncome(kvp.Value.IncomePerTick))
+                        kvp.Value.Budget = HorusEconomyPolicy.MaxBudget;
+                    else
+                    {
+                        HorusLog.Error("Economy", $"[RTS Economy] Invalid runtime economy state for '{kvp.Value.FactionName}'. Income was suspended.");
+                        kvp.Value.Budget = HorusEconomyPolicy.IsValidBudget(kvp.Value.Budget) ? kvp.Value.Budget : 0f;
+                        kvp.Value.IncomePerTick = 0f;
+                    }
                 }
             }
 
@@ -281,22 +403,25 @@ namespace HorusMod.Economy
 
         public float GetUnitCost(UnitDefinition def)
         {
-            if (def == null) return 0f;
+            if (def == null) return float.NaN;
 
             if (!string.IsNullOrEmpty(def.jsonKey) && unitCostLookup.TryGetValue(def.jsonKey, out float keyCost))
-                return keyCost;
+                return HorusEconomyPolicy.IsValidUnitCost(keyCost) ? keyCost : float.NaN;
 
-            float multiplier = config != null && config.unitCostMultiplier > 0f
+            float multiplier = config != null && HorusEconomyPolicy.IsValidMultiplier(config.unitCostMultiplier)
                 ? config.unitCostMultiplier
                 : 1f;
-            return Mathf.Max(0f, def.value * multiplier);
+            if (!HorusEconomyPolicy.IsValidUnitCost(def.value)) return float.NaN;
+            double resolved = (double)def.value * multiplier;
+            return resolved <= HorusEconomyPolicy.MaxUnitCost ? (float)resolved : float.NaN;
         }
 
         public float GetGroupTotalCost(List<UnitDefinition> defs)
         {
-            if (defs == null) return 0f;
+            if (defs == null || defs.Count == 0 || defs.Count > HorusProtocol.MaxEntitiesPerCommand) return float.NaN;
             float total = 0f;
-            foreach (var def in defs) total += GetUnitCost(def);
+            foreach (var def in defs)
+                if (def == null || !HorusEconomyPolicy.TryAddUnitCost(total, GetUnitCost(def), out total)) return float.NaN;
             return total;
         }
 
@@ -318,9 +443,17 @@ namespace HorusMod.Economy
             try
             {
                 var field = typeof(Faction).GetField("budget", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.IgnoreCase);
-                if (field != null) return Convert.ToSingle(field.GetValue(faction));
+                if (field != null)
+                {
+                    float value = Convert.ToSingle(field.GetValue(faction));
+                    return HorusEconomyPolicy.IsValidBudget(value) ? value : (float?)null;
+                }
                 var prop = typeof(Faction).GetProperty("budget", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.IgnoreCase);
-                if (prop != null) return Convert.ToSingle(prop.GetValue(faction));
+                if (prop != null)
+                {
+                    float value = Convert.ToSingle(prop.GetValue(faction));
+                    return HorusEconomyPolicy.IsValidBudget(value) ? value : (float?)null;
+                }
                 
                 HorusLog.Warning("Economy", $"[RTS Economy] SyncWithFactionBudget failed: could not find 'budget' on Faction {faction.factionName}");
             }
@@ -333,7 +466,7 @@ namespace HorusMod.Economy
 
         private void SetFactionRealBudget(Faction faction, float value)
         {
-            if (faction == null) return;
+            if (faction == null || !HorusEconomyPolicy.IsValidBudget(value)) return;
             try
             {
                 var field = typeof(Faction).GetField("budget", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.IgnoreCase);
@@ -367,26 +500,50 @@ namespace HorusMod.Economy
 
         public void SetBudget(int factionIndex, float value)
         {
+#if HORUS_CLIENT
+            if (HorusRemoteAuthority.IsRemoteSession && !HorusClientTransport.ApplyingSnapshot)
+            {
+                HorusRemoteAuthority.TrySubmit(HorusCommandKind.SetBudget,new HorusCommandPayload{FactionIndex=factionIndex,FloatValue=value});
+                return;
+            }
+#endif
+            if (!HorusEconomyPolicy.IsValidBudget(value)) return;
             if (HorusPlugin.SyncWithFactionBudget != null && HorusPlugin.SyncWithFactionBudget.Value)
             {
                 SetFactionRealBudget(GetGameFaction(factionIndex), value);
             }
             var state = GetFactionState(factionIndex);
-            if (state != null) state.Budget = Mathf.Max(0f, value);
+            if (state != null) state.Budget = value;
         }
 
         public void AdjustBudget(int factionIndex, float delta)
         {
+#if HORUS_CLIENT
+            if (HorusRemoteAuthority.IsRemoteSession && !HorusClientTransport.ApplyingSnapshot)
+            {
+                HorusRemoteAuthority.TrySubmit(HorusCommandKind.AdjustBudget,new HorusCommandPayload{FactionIndex=factionIndex,FloatValue=delta});
+                return;
+            }
+#endif
             float current = GetBudget(factionIndex);
-            SetBudget(factionIndex, current + delta);
+            if (HorusEconomyPolicy.TryAddBudget(current, delta, out float next)) SetBudget(factionIndex, next);
         }
 
         public void AdjustUnitCap(int factionIndex, int delta)
         {
+#if HORUS_CLIENT
+            if (HorusRemoteAuthority.IsRemoteSession && !HorusClientTransport.ApplyingSnapshot)
+            {
+                HorusRemoteAuthority.TrySubmit(HorusCommandKind.AdjustUnitCap,new HorusCommandPayload{FactionIndex=factionIndex,IntValue=delta});
+                return;
+            }
+#endif
             var state = GetFactionState(factionIndex);
             if (state == null) return;
             
-            state.UnitCap = Mathf.Max(0, state.UnitCap + delta);
+            long nextCap = (long)state.UnitCap + delta;
+            if (nextCap < 0 || nextCap > HorusEconomyPolicy.MaxUnitCap) return;
+            state.UnitCap = (int)nextCap;
             
             // update config
             if (config != null && config.factionBudgets != null)
@@ -421,6 +578,12 @@ namespace HorusMod.Economy
             if (CurrentMode != HorusMode.RtsCommander)
             {
                 // Sandbox mode: always valid, no cost
+                if (def == null)
+                {
+                    tx.IsValid = false;
+                    tx.DenialReason = "Unit definition is unavailable.";
+                    return tx;
+                }
                 tx.Cost = 0f;
                 return tx;
             }
@@ -447,6 +610,12 @@ namespace HorusMod.Economy
 
             if (CurrentMode != HorusMode.RtsCommander)
             {
+                if (defs == null || defs.Count == 0 || defs.Count > HorusProtocol.MaxEntitiesPerCommand || defs.Any(def => def == null))
+                {
+                    tx.IsValid = false;
+                    tx.DenialReason = "Unit group is empty, unavailable, or oversized.";
+                    return tx;
+                }
                 tx.Cost = 0f;
                 tx.GroupTotalCost = 0f;
                 return tx;
@@ -466,11 +635,27 @@ namespace HorusMod.Economy
 
         private void ValidateTransaction(RtsTransaction tx, int factionIndex, float cost, int unitCount)
         {
+            if (tx == null || !HorusEconomyPolicy.IsValidUnitCost(cost) || unitCount < 1 || unitCount > HorusProtocol.MaxEntitiesPerCommand)
+            {
+                if (tx != null)
+                {
+                    tx.IsValid = false;
+                    tx.DenialReason = "Transaction cost or unit count is invalid.";
+                }
+                return;
+            }
             var state = GetFactionState(factionIndex);
             if (state == null)
             {
                 tx.IsValid = false;
                 tx.DenialReason = "Faction economy not initialized.";
+                return;
+            }
+            if (!HorusEconomyPolicy.IsValidBudget(state.Budget) || !HorusEconomyPolicy.IsValidIncome(state.IncomePerTick) ||
+                !HorusEconomyPolicy.IsValidUnitCap(state.UnitCap) || state.ActiveUnitCount < 0)
+            {
+                tx.IsValid = false;
+                tx.DenialReason = "Faction economy state is invalid.";
                 return;
             }
 
@@ -509,14 +694,27 @@ namespace HorusMod.Economy
         /// </summary>
         public void CommitTransaction(RtsTransaction tx, Unit spawnedUnit)
         {
+#if HORUS_CLIENT
+            if (HorusRemoteAuthority.IsRemoteSession) return;
+#endif
             if (CurrentMode != HorusMode.RtsCommander) return;
             if (tx == null || !tx.IsValid) return;
 
             var state = GetFactionState(tx.FactionIndex);
             if (state == null) return;
 
-            float cost = tx.IsGroupTransaction ? tx.GroupTotalCost : tx.Cost;
-            state.Budget = Mathf.Max(0f, state.Budget - cost);
+            if (spawnedUnit == null || spawnedUnit.definition == null || !UnitMatchesFaction(spawnedUnit, tx.FactionIndex))
+            {
+                HorusLog.Error("Economy", "[RTS Economy] Transaction commit rejected because the spawned unit or faction is invalid.");
+                return;
+            }
+            float cost = GetUnitCost(spawnedUnit.definition);
+            if (!HorusEconomyPolicy.TryAddBudget(state.Budget, -cost, out float nextBudget))
+            {
+                HorusLog.Error("Economy", "[RTS Economy] Transaction commit rejected because its authoritative cost or budget changed.");
+                return;
+            }
+            state.Budget = nextBudget;
 
             if (spawnedUnit != null)
             {
@@ -532,19 +730,34 @@ namespace HorusMod.Economy
         /// </summary>
         public void CommitGroupTransaction(RtsTransaction tx, List<Unit> spawnedUnits)
         {
+#if HORUS_CLIENT
+            if (HorusRemoteAuthority.IsRemoteSession) return;
+#endif
             if (CurrentMode != HorusMode.RtsCommander) return;
             if (tx == null || !tx.IsValid) return;
 
             var state = GetFactionState(tx.FactionIndex);
             if (state == null) return;
 
+            if (spawnedUnits == null || spawnedUnits.Count == 0 || spawnedUnits.Count > HorusProtocol.MaxEntitiesPerCommand) return;
             float committedCost = 0f;
             if (spawnedUnits != null)
             {
                 for (int i = 0; i < spawnedUnits.Count; i++)
-                    if (spawnedUnits[i]?.definition != null) committedCost += GetUnitCost(spawnedUnits[i].definition);
+                {
+                    if (spawnedUnits[i]?.definition == null || !UnitMatchesFaction(spawnedUnits[i], tx.FactionIndex) || !HorusEconomyPolicy.TryAddUnitCost(committedCost, GetUnitCost(spawnedUnits[i].definition), out committedCost))
+                    {
+                        HorusLog.Error("Economy", "[RTS Economy] Group transaction commit rejected because an authoritative unit cost is invalid.");
+                        return;
+                    }
+                }
             }
-            state.Budget = Mathf.Max(0f, state.Budget - committedCost);
+            if (!HorusEconomyPolicy.TryAddBudget(state.Budget, -committedCost, out float nextBudget))
+            {
+                HorusLog.Error("Economy", "[RTS Economy] Group transaction commit rejected because the authoritative budget changed.");
+                return;
+            }
+            state.Budget = nextBudget;
 
             if (spawnedUnits != null)
             {
@@ -557,6 +770,14 @@ namespace HorusMod.Economy
 
             int successfulCount = spawnedUnits?.Count ?? 0;
             HorusLog.Info("Economy", $"[RTS Economy] Group transaction committed: -{committedCost:F0} for {successfulCount} successful spawn(s) in faction '{state.FactionName}'. Budget={state.Budget:F0}, Units={state.ActiveUnitCount}/{state.UnitCap}");
+        }
+
+        private static bool UnitMatchesFaction(Unit unit, int factionIndex)
+        {
+            if (unit == null) return false;
+            FactionSlot expected = FactionSlot.Resolve(factionIndex);
+            FactionHQ actual = unit.NetworkHQ ?? unit.MapHQ ?? unit.Editor_HQ;
+            return expected.IsValid && actual == expected.HQ;
         }
 
         // ─── Deployment Confirmation ─────────────────────────────────────────────

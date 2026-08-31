@@ -70,17 +70,28 @@ This roadmap separates released behavior from work that is still under developme
 - Native seeker tracking from a chosen launch point for guided missiles.
 - Target-relative, velocity-led overhead spawning for bombs, rockets, and guided weapons without attaching a projectile to the target or replacing native damage/fuze behavior.
 
-## After v1.4.3 - Dedicated server support
+## Implemented in v2.0.0-rc.1 - Dedicated server candidate
 
-Dedicated/headless control is not supported yet. The intended architecture is:
+- Split the product into `Horus.Shared.dll`, a headless-safe `Horus.Server.dll`, and visual/input-only `Horus.Client.dll`.
+- Added a versioned Mirage command gateway with manual bounded serializers, mission session IDs, monotonic revisions, paged snapshots, sequenced events, reconnect/resync, and multiple authorized GMs.
+- Authenticate only an already-authenticated Steam connection using the exact SteamID64 from `INetworkPlayer.AuthData`. The server allowlist is empty and the feature is disabled by default; UDP-only identity, names, factions, passwords, and claimed ownership do not grant access.
+- Re-resolve catalog definitions, factions, positions, costs, loadouts, targets, ownership, factory types, and current revision on the authoritative Unity thread.
+- Apply 16 KiB message, 64-entity, 32-waypoint, mount-list, finite-number, request-deduplication, per-SteamID rate-limit, and stale-revision controls.
+- Route spawn/group requests, Live Ordnance, duplicate/delete, tactical orders, ROE, loadout/livery/fuel/skill editing, RTS economy, factories, persistence, and undo/redo through the same local-or-remote command contract.
+- Persist daily sanitized JSONL audits with configurable retention and keep deletion limited to Horus-created entities unless the operator explicitly changes policy.
+- Keep Nuclei optional and read-only for status/diagnostics. The official loopback TCP administration service is not a Horus mutation transport.
+- Generate reproducible GM, Dedicated, and Full packages without automatically deploying them into a live installation.
 
-1. Split UI/camera/input code from an authoritative, headless-safe Horus server runtime.
-2. Verify BepInEx startup and mission rotation on the official Windows and Linux dedicated servers, including Workshop missions.
-3. Introduce a versioned, read-only Mirage protocol before permitting world mutations.
-4. Authenticate Game Masters using the network player's SteamID and a server-side allowlist that is empty by default.
-5. Add request IDs, deduplication, rate limits, strict server-side definition/position validation, and audit logging.
-6. Enable reversible spawn/delete commands before movement, loadouts, or factory administration.
-7. Keep Nuclear Option's loopback remote-command TCP interface limited to server status and mission administration; it will not be repurposed as an unauthenticated Game Master transport.
+### Runtime certification gate still required
+
+- Run BepInEx headless and two mission rotations on the official Windows and Linux dedicated-server applications.
+- Cover BuiltIn and Workshop missions, allowed/denied/normal clients, two GMs, reconnect, mission changes, incompatible versions, abuse limits, and a four-hour soak.
+- Exercise the complete mutation matrix and prove that ordinary clients observe native replication without Horus.
+- Retain clean server/client logs, hashes, exact configuration/version evidence, and visible GM-client evidence.
+
+The full procedure and acceptance matrix are in [docs/dedicated-server.md](docs/dedicated-server.md). Until those checks pass, v2.0.0-rc.1 remains a validation candidate rather than a production release.
+
+The public prerelease may list infrastructure-limited cases as `PENDING`, including simultaneous multi-GM testing when a second legitimate Steam identity is unavailable. Pending results never become PASS by inference and continue to block the stable `v2.0.0` promotion.
 
 Normal players should not need the Horus client. Content supplied by third-party asset mods will still require compatible content on every machine that must render or simulate it.
 
@@ -92,5 +103,5 @@ References:
 ## Release policy
 
 - v1.3.0 published 2026-07-31; v1.3.1 and v1.4.0 were built as the approved RMB/tactical release sequence on 2026-08-03; v1.4.1 fixes the deferred IMGUI context-menu lifecycle; v1.4.2 adds global-English menus and group target orders; v1.4.3 adds explicit target-relative Live Ordnance modes.
-- Do not publish, push, tag, or package a new version without explicit approval.
+- Publish v2.0.0-rc.1 only as a GitHub prerelease from a reviewed merge commit, with `v1.4.3` retained as the stable/latest line, immutable historical tags, reproducible assets, checksums, a release manifest, and explicit pending runtime cases.
 - Keep runtime-dependent behavior marked experimental or unknown until it passes the acceptance checks above.

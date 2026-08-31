@@ -1,0 +1,42 @@
+{
+  "MissionDirectory": "C:/NuclearOption-Missions",
+  "ModdedServer": true,
+  "Hidden": false,
+  "ServerName": "Nuclear Option Horus RC Test",
+  "Port": {
+    "IsOverride": true,
+    "Value": 7777
+  },
+  "QueryPort": {
+    "IsOverride": true,
+    "Value": 7778
+  },
+  "Password": "",
+  "MaxPlayers": 16,
+  "BanListPaths": ["ban_list.txt"],
+  "DisableErrorKick": false,
+  "ErrorKickImmuneListPaths": [],
+  "NoPlayerStopTime": 30.0,
+  "PostMissionDelay": 30.0,
+  "RotationType": 0,
+  "MissionRotation": [
+    {
+      "Key": { "Group": "BuiltIn", "Name": "Escalation" },
+      "MaxTime": 7200.0
+    },
+    {
+      "Key": { "Group": "BuiltIn", "Name": "Terminal Control" },
+      "MaxTime": 7200.0
+    }
+  ],
+  "VoteKick": {
+    "Enabled": true,
+    "PassRatio": 0.6,
+    "MinVotes": 3,
+    "AutoBanThreshold": 3,
+    "VoteDuration": 45.0,
+    "ResolutionDisplayTime": 20.0,
+    "NewVoteLockout": 10.0,
+    "RequesterCooldown": 300.0
+  }
+}

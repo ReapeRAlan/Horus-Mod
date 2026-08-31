@@ -53,6 +53,7 @@ namespace HorusMod.Interaction
         public static void ChooseHQTargetPostfix(Unit searcher, List<WeaponStation> stationList,
             ref CombatAI.TargetSearchResults __result)
         {
+            if (!HorusPlugin.IsRuntimeEnabled) return;
             try
             {
                 HorusTacticalOrderService.OverrideForcedTarget(searcher, stationList, ref __result);
@@ -65,16 +66,19 @@ namespace HorusMod.Interaction
 
         public static bool WeaponStationFirePrefix(Unit owner)
         {
+            if (!HorusPlugin.IsRuntimeEnabled) return true;
             return !HorusTacticalOrderService.IsFireSuppressed(owner);
         }
 
         public static bool WeaponStationLaunchPrefix(Unit owner)
         {
+            if (!HorusPlugin.IsRuntimeEnabled) return true;
             return !HorusTacticalOrderService.IsFireSuppressed(owner);
         }
 
         public static bool WeaponStationRemoteFirePrefix(Unit owner)
         {
+            if (!HorusPlugin.IsRuntimeEnabled) return true;
             return !HorusTacticalOrderService.IsFireSuppressed(owner);
         }
     }

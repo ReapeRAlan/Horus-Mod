@@ -65,9 +65,31 @@ namespace HorusMod.Networking
             return CanSpawn();
         }
 
+        public static bool CanRequestMutation()
+        {
+#if HORUS_CLIENT
+            if (HorusMod.Client.HorusRemoteAuthority.IsRemoteSession)
+                return HorusMod.Client.HorusRemoteAuthority.IsAuthorized;
+#endif
+            return CanSpawn();
+        }
+
+        public static bool CanRequestDelete()
+        {
+#if HORUS_CLIENT
+            if (HorusMod.Client.HorusRemoteAuthority.IsRemoteSession)
+                return HorusMod.Client.HorusRemoteAuthority.IsAuthorized;
+#endif
+            return CanDelete();
+        }
+
         /// <summary>Short label describing the current Horus mode for the UI.</summary>
         public static string GetModeLabel()
         {
+#if HORUS_CLIENT
+            if (HorusMod.Client.HorusRemoteAuthority.IsRemoteSession)
+                return HorusMod.Client.HorusRemoteAuthority.IsAuthorized ? "Dedicated Server GM" : "Dedicated Server - Awaiting Permission";
+#endif
             if (IsLocalSinglePlayer()) return "Single Player";
             if (IsMultiplayerHost()) return "Multiplayer Host";
             if (IsMultiplayerClient()) return "Multiplayer Client - No Permission";
@@ -77,6 +99,12 @@ namespace HorusMod.Networking
         /// <summary>Short label describing the current permission level for the UI.</summary>
         public static string GetPermissionLabel()
         {
+#if HORUS_CLIENT
+            if (HorusMod.Client.HorusRemoteAuthority.IsRemoteSession)
+                return HorusMod.Client.HorusRemoteAuthority.IsAuthorized
+                    ? "Steam allowlist (full remote authority)"
+                    : HorusMod.Client.HorusRemoteAuthority.Status;
+#endif
             if (IsLocalSinglePlayer()) return "Single Player (full access)";
             if (IsMultiplayerHost()) return "Host (full access)";
             if (IsMultiplayerClient()) return "Client blocked (host permission required)";

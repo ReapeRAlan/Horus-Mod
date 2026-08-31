@@ -1,5 +1,9 @@
 using System;
 using System.Collections.Generic;
+#if HORUS_CLIENT
+using HorusMod.Client;
+using HorusMod.Shared;
+#endif
 using HorusMod.Loadouts;
 using HorusMod.Data;
 using HorusMod.Logging;
@@ -83,7 +87,8 @@ namespace HorusMod.Spawning
         public HorusSpawnFailure Failure { get; private set; }
         public string Message { get; private set; }
         public Exception Exception { get; private set; }
-        public bool Success => Unit != null && Failure == HorusSpawnFailure.None;
+        public bool IsRemotePending { get; private set; }
+        public bool Success => Failure == HorusSpawnFailure.None && (Unit != null || IsRemotePending);
 
         public static HorusSpawnResult Ok(Unit unit, HorusSpawnRequest request) => new HorusSpawnResult
         {
@@ -108,6 +113,18 @@ namespace HorusMod.Spawning
             Failure = failure,
             Message = message,
             Exception = exception
+        };
+
+        public static HorusSpawnResult RemotePending(HorusSpawnRequest request) => new HorusSpawnResult
+        {
+            Definition = request?.Definition,
+            HQ = request?.HQ,
+            Position = request != null ? request.Position : default,
+            Surface = request != null ? request.Surface : PlacementSurface.Free,
+            Aircraft = request?.Aircraft?.Clone(),
+            Failure = HorusSpawnFailure.None,
+            Message = "Dedicated spawn request sent",
+            IsRemotePending = true
         };
     }
 
@@ -171,6 +188,36 @@ namespace HorusMod.Spawning
 
         public static HorusSpawnResult Spawn(HorusSpawnRequest request)
         {
+#if HORUS_CLIENT
+            if (HorusRemoteAuthority.IsRemoteSession)
+            {
+                if (request == null || request.Definition == null)
+                    return HorusSpawnResult.Fail(HorusSpawnFailure.InvalidDefinition, "No unit definition was supplied.", request);
+                UnitEntry remoteEntry=UnitCatalog.FindByDefinition(request.Definition);
+                var payload = new HorusCommandPayload
+                {
+                    DefinitionKey = request.Definition.jsonKey ?? "",
+                    SecondaryKey = remoteEntry?.Source ?? "",
+                    UniqueName = request.UniqueName ?? "",
+                    FactionIndex = ResolveFactionIndex(request.HQ),
+                    Yaw = request.Rotation.eulerAngles.y,
+                    BoolValue = request.Stationary,
+                    FloatValue = request.Aircraft != null ? request.Aircraft.Skill : request.Skill,
+                    FloatValue2 = request.Aircraft != null ? request.Aircraft.FuelRatio : request.MissileLaunchSpeed,
+                    FloatValue3 = request.Aircraft != null ? request.Aircraft.Bravery : request.MissileLaunchElevation,
+                    IntValue = request.Aircraft != null ? request.Aircraft.Livery.Index : 0
+                };
+                payload.Points.Add(HorusRemoteAuthority.Point(request.Position));
+                if (request.Aircraft?.Loadout?.weapons != null)
+                    foreach (WeaponMount mount in request.Aircraft.Loadout.weapons)
+                        payload.MountKeys.Add(mount != null ? mount.jsonKey ?? "" : "");
+                if (!string.IsNullOrEmpty(request.TargetUnitName) && UnitRegistry.customIDLookup.TryGetValue(request.TargetUnitName, out Unit target) && target != null)
+                    payload.TargetUnitId = target.persistentID.Id;
+                return HorusRemoteAuthority.TrySubmit(HorusCommandKind.Spawn, payload)
+                    ? HorusSpawnResult.RemotePending(request)
+                    : HorusSpawnResult.Fail(HorusSpawnFailure.PermissionDenied, HorusRemoteAuthority.Status, request);
+            }
+#endif
             if (!HorusPermissions.CanSpawn())
                 return HorusSpawnResult.Fail(HorusSpawnFailure.PermissionDenied, "Host authority is required.", request);
             if (request == null || request.Definition == null)
@@ -378,6 +425,15 @@ namespace HorusMod.Spawning
                 return HorusSpawnResult.Fail(HorusSpawnFailure.NativeSpawnFailed, ex.Message, request, ex);
             }
         }
+
+#if HORUS_CLIENT
+        private static int ResolveFactionIndex(FactionHQ hq)
+        {
+            if (FactionRegistry.factions == null) return -1;
+            if (hq?.faction == null) return FactionRegistry.factions.Count;
+            return FactionRegistry.factions.IndexOf(hq.faction);
+        }
+#endif
 
         private static bool TryPrepareAircraftOptions(
             HorusSpawnRequest request,

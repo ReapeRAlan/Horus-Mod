@@ -1,0 +1,3 @@
+# Horus dedicated administrators
+# One exact SteamID64 per line. Empty means deny all mutations.
+# 76561198000000000

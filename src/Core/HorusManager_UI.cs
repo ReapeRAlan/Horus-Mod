@@ -201,7 +201,7 @@ namespace HorusMod.Core
             GUILayout.BeginVertical(HorusTheme.Card);
             GUILayout.Label("TACTICAL ORDERS", HorusTheme.TitleText);
             bool hasSelection = WorldSelection != null && WorldSelection.HasSelection;
-            bool canCommand = hasSelection && HorusPermissions.CanSpawn() && inputRouter != null;
+            bool canCommand = hasSelection && HorusPermissions.CanRequestMutation() && inputRouter != null;
 
             if (!hasSelection)
             {
@@ -254,7 +254,7 @@ namespace HorusMod.Core
             GUILayout.Label("RMB terrain: Move.  Alt+RMB terrain: Attack-Move or start Patrol.", HorusTheme.LabelWrap);
             GUILayout.Label("With units selected, RMB a known enemy to Attack or a friendly unit to Guard/Escort.", HorusTheme.LabelWrap);
             GUILayout.Label("Patrol: LMB adds points, Backspace removes, Enter confirms, Esc cancels.", HorusTheme.LabelWrap);
-            if (!HorusPermissions.CanSpawn())
+            if (!HorusPermissions.CanRequestMutation())
                 GUILayout.Label("Commands are available only in single player or to the local multiplayer host.", HorusTheme.LabelMuted);
             GUILayout.EndVertical();
         }
@@ -340,10 +340,10 @@ namespace HorusMod.Core
             GUILayout.BeginHorizontal();
             GUILayout.Label("Permission: ", GUILayout.Width(80));
             Color c = GUI.color;
-            if (HorusPermissions.IsMultiplayerClient())
+            if (!HorusPermissions.CanRequestMutation())
             {
                 GUI.color = new Color(1f, 0.4f, 0.4f);
-                GUILayout.Label("Client — View Only");
+                GUILayout.Label(HorusPermissions.GetPermissionLabel());
             }
             else if (HorusPermissions.IsMultiplayerHost())
             {
@@ -353,7 +353,7 @@ namespace HorusMod.Core
             else
             {
                 GUI.color = new Color(0.4f, 1f, 0.4f);
-                GUILayout.Label("Single Player");
+                GUILayout.Label(HorusPermissions.GetPermissionLabel());
             }
             GUILayout.EndHorizontal();
             
@@ -780,7 +780,7 @@ namespace HorusMod.Core
             DrawHardpointAndPresetEditor(definition, first.NetworkHQ, state);
 
             bool previousEnabled = GUI.enabled;
-            GUI.enabled = previousEnabled && HorusPermissions.CanSpawn();
+            GUI.enabled = previousEnabled && HorusPermissions.CanRequestMutation();
             if (GUILayout.Button("Apply loadout to selected aircraft"))
             {
                 int applied = 0;
@@ -829,7 +829,7 @@ namespace HorusMod.Core
                 HorusToasts.Show($"Pilot skill applied to {WorldSelection.Count} aircraft");
             }
             GUI.enabled = previousEnabled;
-            if (!HorusPermissions.CanSpawn()) GUILayout.Label("Host only: editing is disabled for multiplayer clients.", HorusTheme.LabelMuted);
+            if (!HorusPermissions.CanRequestMutation()) GUILayout.Label("Host or allowlisted dedicated GM authority is required.", HorusTheme.LabelMuted);
             if (!string.IsNullOrEmpty(state.Status)) GUILayout.Label(state.Status, HorusTheme.LabelWrap);
         }
 
@@ -1518,7 +1518,7 @@ namespace HorusMod.Core
             GUILayout.Label("AIRCRAFT LOADOUT & SKIN", HorusTheme.TitleText);
             GUILayout.Label($"Editing {WorldSelection.Count} selected aircraft. You can also right-click an aircraft.", HorusTheme.LabelMuted);
 
-            bool allowed = HorusPermissions.CanSpawn();
+            bool allowed = HorusPermissions.CanRequestMutation();
             bool previousEnabled = GUI.enabled;
             GUI.enabled = previousEnabled && allowed;
 
@@ -1867,7 +1867,7 @@ namespace HorusMod.Core
                 GUI.color = prevColor;
 
                 // Host-only budget cheats
-                if (HorusPermissions.CanSpawn() && i == selectedFactionIndex)
+                if (HorusPermissions.CanRequestMutation() && i == selectedFactionIndex)
                 {
                     GUILayout.BeginHorizontal();
                     if (GUILayout.Button("-1000", GUILayout.Width(50))) economyManager.AdjustBudget(i, -1000f);
@@ -1957,7 +1957,7 @@ namespace HorusMod.Core
             }
 
             // Match controls (host only)
-            if (HorusPermissions.CanSpawn())
+            if (HorusPermissions.CanRequestMutation())
             {
                 GUILayout.Space(3);
                 if (GUILayout.Button("↺ Reset Match Economy"))
@@ -2023,7 +2023,7 @@ namespace HorusMod.Core
                     selectedFactory = null;
             }
             var presets = manager.Config.factoryPresets;
-            bool isHost = HorusPermissions.CanSpawn();
+            bool isHost = HorusPermissions.CanRequestMutation();
 
             GUILayout.Space(5);
             if (!Section("RTS Factories & Production", ref showFactoryTools)) return;
