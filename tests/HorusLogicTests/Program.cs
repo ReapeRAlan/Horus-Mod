@@ -313,6 +313,15 @@ internal static class Program
         Check("server allowlist input is strict UTF-8 and size bounded",
             dedicatedPluginSource.Contains("new UTF8Encoding(false,true)", StringComparison.Ordinal) &&
             dedicatedPluginSource.Contains("Allowlist file is oversized", StringComparison.Ordinal));
+        string nucleiBridgeSource = ReadRepoFile("src", "Server", "HorusNucleiBridge.cs");
+        string serverProjectSource = ReadRepoFile("Horus.Server.csproj");
+        Check("optional Nuclei bridge matches the v1.3.3 command API without a binary dependency",
+            nucleiBridgeSource.Contains("Nuclei.Features.Commands.ICommand", StringComparison.Ordinal) &&
+            nucleiBridgeSource.Contains("method.Name==\"RegisterCommand\"&&method.GetParameters().Length==1", StringComparison.Ordinal) &&
+            nucleiBridgeSource.Contains("Enum.Parse(permissionType,\"Everyone\"", StringComparison.Ordinal) &&
+            nucleiBridgeSource.Contains("Enum.Parse(permissionType,\"Admin\"", StringComparison.Ordinal) &&
+            nucleiBridgeSource.Contains("SendPrivateChatMessage", StringComparison.Ordinal) &&
+            !serverProjectSource.Contains("MaxWasUnavailable.Nuclei", StringComparison.Ordinal));
         string windowsRuntimeRunner = ReadRepoFile("build", "runtime", "run-windows-dedicated.ps1");
         string linuxRuntimeRunner = ReadRepoFile("build", "runtime", "run-linux-dedicated.sh");
         Check("Windows runtime validation fails closed on readiness timeout and log flooding",
