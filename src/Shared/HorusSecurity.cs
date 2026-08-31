@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Text;
 
 namespace HorusMod.Shared
 {
@@ -35,7 +36,7 @@ namespace HorusMod.Shared
                 }
                 result.steamIds.Add(id);
             }
-            return result;
+            return errors.Count == 0 ? result : new HorusAdminAllowlist();
         }
 
         public static bool IsIndividualSteamId64(ulong id)
@@ -137,8 +138,19 @@ namespace HorusMod.Shared
                 !ValidKey(envelope.Payload.FactoryId) || !ValidKey(envelope.Payload.PresetName) ||
                 !ValidKey(envelope.Payload.UniqueName))
                 return Fail("Text values contain unsupported control characters.", out error);
+            var unitIds=new HashSet<uint>();
+            foreach(uint unitId in envelope.Payload.UnitIds)
+                if(unitId==0||!unitIds.Add(unitId))return Fail("Unit ids must be nonzero and unique.",out error);
             foreach (string mountKey in envelope.Payload.MountKeys)
                 if (!ValidKey(mountKey)) return Fail("Mount keys contain unsupported control characters.", out error);
+            int mountBytes = 0;
+            foreach (string mountKey in envelope.Payload.MountKeys)
+            {
+                try { mountBytes = checked(mountBytes + Encoding.UTF8.GetByteCount(mountKey)); }
+                catch (Exception ex) when (ex is EncoderFallbackException || ex is OverflowException)
+                { return Fail("Mount keys are not valid bounded UTF-8.", out error); }
+                if (mountBytes > HorusProtocol.MaxStringListBytes) return Fail("Mount key byte limit exceeded.", out error);
+            }
             foreach (HorusVector3 point in envelope.Payload.Points)
                 if (!point.IsFinite || Math.Abs(point.X) > 100000000f || Math.Abs(point.Y) > 100000000f || Math.Abs(point.Z) > 100000000f)
                     return Fail("Coordinates must be finite and within supported world bounds.", out error);
@@ -151,10 +163,7 @@ namespace HorusMod.Shared
         private static bool Finite(float value) => !float.IsNaN(value) && !float.IsInfinity(value);
         private static bool ValidKey(string value)
         {
-            if (value == null) return false;
-            for (int i = 0; i < value.Length; i++)
-                if (char.IsControl(value[i])) return false;
-            return true;
+            return HorusWireText.IsStableKey(value);
         }
         private static bool Fail(string message, out string error) { error = message; return false; }
     }

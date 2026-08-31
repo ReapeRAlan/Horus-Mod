@@ -122,14 +122,15 @@ namespace HorusMod.Shared
 
         private static void WriteStatePage(BinaryWriter w, HorusStatePage v)
         {
+            if(v.PageCount<1||v.PageCount>HorusProtocol.MaxSnapshotPages||v.PageIndex<0||v.PageIndex>=v.PageCount)throw new InvalidDataException("Invalid snapshot page metadata.");
             WriteGuid(w, v.SessionId); WriteGuid(w, v.SnapshotId); w.Write(v.Revision); w.Write(v.PageIndex); w.Write(v.PageCount); w.Write(v.RtsMode); w.Write(v.RtsDeployMode);
-            WriteCount(w, v.Units.Count, 64);
+            WriteCount(w, v.Units.Count, HorusProtocol.MaxSnapshotUnitsPerPage);
             foreach (HorusUnitState unit in v.Units)
             {
                 w.Write(unit.UnitId); WriteString(w, unit.DefinitionKey); WriteString(w, unit.Name); w.Write(unit.FactionIndex);
                 WriteVector(w, unit.Position); w.Write(unit.HorusOwned);
             }
-            WriteCount(w, v.Factories.Count, 64);
+            WriteCount(w, v.Factories.Count, HorusProtocol.MaxSnapshotFactoriesPerPage);
             foreach (HorusFactoryState factory in v.Factories)
             {
                 WriteString(w, factory.FactoryId); WriteString(w, factory.PresetName); w.Write(factory.FactionIndex);
@@ -139,21 +140,22 @@ namespace HorusMod.Shared
                 w.Write(factory.MaxActiveProducedUnits);w.Write(factory.UsesRallyPoint);WriteVector(w,factory.RallyPoint);
                 w.Write(factory.SpawnRadius);WriteString(w,factory.LastStatus);
             }
-            WriteCount(w, v.Budgets.Count, 64);
+            WriteCount(w, v.Budgets.Count, HorusProtocol.MaxSnapshotBudgetsPerPage);
             foreach (HorusBudgetState budget in v.Budgets) { w.Write(budget.FactionIndex); w.Write(budget.Budget);w.Write(budget.IncomePerTick);w.Write(budget.UnitCap);w.Write(budget.ActiveUnitCount); }
         }
         private static HorusStatePage ReadStatePage(BinaryReader r)
         {
             var value = new HorusStatePage { SessionId = ReadGuid(r), SnapshotId = ReadGuid(r), Revision = r.ReadUInt64(), PageIndex = r.ReadInt32(), PageCount = r.ReadInt32(), RtsMode = r.ReadInt32(), RtsDeployMode = r.ReadInt32() };
-            int units = ReadCount(r, 64);
+            if(value.PageCount<1||value.PageCount>HorusProtocol.MaxSnapshotPages||value.PageIndex<0||value.PageIndex>=value.PageCount)throw new InvalidDataException("Invalid snapshot page metadata.");
+            int units = ReadCount(r, HorusProtocol.MaxSnapshotUnitsPerPage);
             for (int i = 0; i < units; i++) value.Units.Add(new HorusUnitState { UnitId = r.ReadUInt32(), DefinitionKey = ReadString(r), Name = ReadString(r), FactionIndex = r.ReadInt32(), Position = ReadVector(r), HorusOwned = r.ReadBoolean() });
-            int factories = ReadCount(r, 64);
+            int factories = ReadCount(r, HorusProtocol.MaxSnapshotFactoriesPerPage);
             for (int i = 0; i < factories; i++)
             {
                 var factory=new HorusFactoryState { FactoryId = ReadString(r), PresetName = ReadString(r), FactionIndex = r.ReadInt32(), Enabled = r.ReadBoolean(), ProductionEnabled = r.ReadBoolean(), ConsumesBudget = r.ReadBoolean(), Position = ReadVector(r),Yaw=r.ReadSingle(),GeneratesIncome=r.ReadBoolean(),IncomePerMinute=r.ReadSingle() };
                 ReadStringList(r,factory.ProductionKeys,HorusProtocol.MaxMounts);factory.CurrentProductionIndex=r.ReadInt32();factory.ProductionIntervalSeconds=r.ReadSingle();factory.ProductionTimer=r.ReadSingle();factory.MaxActiveProducedUnits=r.ReadInt32();factory.UsesRallyPoint=r.ReadBoolean();factory.RallyPoint=ReadVector(r);factory.SpawnRadius=r.ReadSingle();factory.LastStatus=ReadString(r);value.Factories.Add(factory);
             }
-            int budgets = ReadCount(r, 64);
+            int budgets = ReadCount(r, HorusProtocol.MaxSnapshotBudgetsPerPage);
             for (int i = 0; i < budgets; i++) value.Budgets.Add(new HorusBudgetState { FactionIndex = r.ReadInt32(), Budget = r.ReadSingle(),IncomePerTick=r.ReadSingle(),UnitCap=r.ReadInt32(),ActiveUnitCount=r.ReadInt32() });
             return value;
         }
@@ -167,8 +169,29 @@ namespace HorusMod.Shared
         private static void ReadVectorList(BinaryReader r, List<HorusVector3> values, int max) { int count = ReadCount(r, max); for (int i = 0; i < count; i++) values.Add(ReadVector(r)); }
         private static void WriteUIntList(BinaryWriter w, List<uint> values) { WriteCount(w, values.Count, HorusProtocol.MaxEntitiesPerCommand); foreach (uint value in values) w.Write(value); }
         private static void ReadUIntList(BinaryReader r, List<uint> values, int max) { int count = ReadCount(r, max); for (int i = 0; i < count; i++) values.Add(r.ReadUInt32()); }
-        private static void WriteStringList(BinaryWriter w, List<string> values) { WriteCount(w, values.Count, HorusProtocol.MaxMounts); foreach (string value in values) WriteString(w, value); }
-        private static void ReadStringList(BinaryReader r, List<string> values, int max) { int count = ReadCount(r, max); for (int i = 0; i < count; i++) values.Add(ReadString(r)); }
+        private static void WriteStringList(BinaryWriter w, List<string> values)
+        {
+            int totalBytes = 0;
+            foreach (string value in values)
+            {
+                totalBytes = checked(totalBytes + StrictUtf8.GetByteCount(value ?? ""));
+                if (totalBytes > HorusProtocol.MaxStringListBytes) throw new InvalidDataException("String collection byte limit exceeded.");
+            }
+            WriteCount(w, values.Count, HorusProtocol.MaxMounts);
+            foreach (string value in values) WriteString(w, value);
+        }
+        private static void ReadStringList(BinaryReader r, List<string> values, int max)
+        {
+            int count = ReadCount(r, max);
+            int totalBytes = 0;
+            for (int i = 0; i < count; i++)
+            {
+                string value = ReadString(r);
+                totalBytes = checked(totalBytes + StrictUtf8.GetByteCount(value));
+                if (totalBytes > HorusProtocol.MaxStringListBytes) throw new InvalidDataException("String collection byte limit exceeded.");
+                values.Add(value);
+            }
+        }
         private static void WriteCount(BinaryWriter w, int count, int max) { if (count < 0 || count > max) throw new InvalidDataException("Collection limit exceeded."); w.Write((ushort)count); }
         private static int ReadCount(BinaryReader r, int max) { int count = r.ReadUInt16(); if (count > max) throw new InvalidDataException("Collection limit exceeded."); return count; }
         private static void WriteGuid(BinaryWriter w, Guid value) { w.Write(value.ToByteArray()); }

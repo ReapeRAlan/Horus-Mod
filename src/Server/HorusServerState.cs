@@ -27,12 +27,17 @@ namespace HorusMod.Server
 #if !HORUS_LOGIC_TESTS
     internal sealed class HorusServerClientState
     {
-        public readonly HorusRequestDeduplicator Deduplicator = new HorusRequestDeduplicator();
-        public HorusTokenBucket MutationRate;
-        public HorusTokenBucket ReadRate;
+        public HorusTokenBucket ConnectionRate;
         public bool HelloReceived;
         public bool Authorized;
         public ulong SteamId;
+    }
+
+    internal sealed class HorusServerPrincipalState
+    {
+        public readonly HorusRequestDeduplicator Deduplicator = new HorusRequestDeduplicator();
+        public HorusTokenBucket MutationRate;
+        public HorusTokenBucket ReadRate;
     }
 #endif
 }

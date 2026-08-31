@@ -18,6 +18,7 @@ namespace HorusMod.Server
         private readonly HorusServerState state;
         private readonly HorusOrders orders;
         private readonly bool allowMissionUnitDelete;
+        private readonly bool allowMissionUnitMutation;
         private readonly Stack<JournalEntry> undo = new Stack<JournalEntry>();
         private readonly Stack<JournalEntry> redo = new Stack<JournalEntry>();
         private bool replaying;
@@ -40,15 +41,18 @@ namespace HorusMod.Server
             public int Livery;
             public Loadout Loadout;
             public uint CurrentId;
+            public bool WasHorusOwned;
         }
 
-        public HorusServerCommandExecutor(HorusServerState state, MonoBehaviour runner, bool allowMissionUnitDelete)
+        public HorusServerCommandExecutor(HorusServerState state, MonoBehaviour runner, bool allowMissionUnitDelete, bool allowMissionUnitMutation)
         {
             this.state = state;
             this.allowMissionUnitDelete = allowMissionUnitDelete;
+            this.allowMissionUnitMutation = allowMissionUnitMutation;
             orders = new HorusOrders(runner);
             if (RtsEconomyManager.Instance == null) new RtsEconomyManager();
             RtsFactoryManager.UnitProduced = unit => { if(unit!=null)state.RecordSpawn(unit.persistentID.Id); };
+            RtsFactoryManager.UnitRemoved = unit => { if(unit!=null)state.RecordDelete(unit.persistentID.Id); };
         }
 
         public void ResetMission()
@@ -56,6 +60,8 @@ namespace HorusMod.Server
             undo.Clear();redo.Clear();replaying=false;
             RtsEconomyManager.Instance?.ResetRuntimeState();
         }
+
+        public void Dispose(){RtsFactoryManager.UnitProduced=null;RtsFactoryManager.UnitRemoved=null;}
 
         public void Tick()
         {
@@ -99,10 +105,10 @@ namespace HorusMod.Server
                     case HorusCommandKind.ClearFactoryRally: Factory(command, result, FactoryAction.ClearRally); break;
                     case HorusCommandKind.StartAllFactories: RtsFactoryManager.Instance.StartAllFactories(); Accept(result, "Factories started."); break;
                     case HorusCommandKind.StopAllFactories: RtsFactoryManager.Instance.StopAllFactories(); Accept(result, "Factories stopped."); break;
-                    case HorusCommandKind.ReloadFactories: RtsFactoryManager.Instance.ReloadConfig(); Accept(result, "Factories reloaded."); break;
+                    case HorusCommandKind.ReloadFactories: RtsFactoryManager.Instance.ReloadConfig(); CompletePersistence(result,"Factories reloaded."); break;
                     case HorusCommandKind.ResetFactoryPresets: RtsFactoryManager.Instance.ResetPresetsToDefaults(); Accept(result, "Factory presets reset."); break;
-                    case HorusCommandKind.SaveFactories: RtsFactoryManager.Instance.SaveInstances(); Accept(result, "Factories saved."); break;
-                    case HorusCommandKind.LoadFactories: RtsFactoryManager.Instance.LoadInstances(); Accept(result, "Factories loaded."); break;
+                    case HorusCommandKind.SaveFactories: RtsFactoryManager.Instance.SaveInstances(); CompletePersistence(result,"Factories saved."); break;
+                    case HorusCommandKind.LoadFactories: RtsFactoryManager.Instance.LoadInstances(); CompletePersistence(result,"Factories loaded."); break;
                     case HorusCommandKind.Undo: Replay(undo, redo, true, result, "Undo complete."); break;
                     case HorusCommandKind.Redo: Replay(redo, undo, false, result, "Redo complete."); break;
                     case HorusCommandKind.SetRtsMode: SetRtsMode(command,result); break;
@@ -129,6 +135,11 @@ namespace HorusMod.Server
             if (payload.Points.Count != 1) { Reject(result, HorusResultCode.InvalidPayload, "Spawn requires one position."); return; }
             UnitEntry entry = ResolveCatalogEntry(payload.DefinitionKey,payload.SecondaryKey);
             if (entry?.Def == null) { Reject(result, HorusResultCode.NotFound, "Definition was not found."); return; }
+            if(payload.FloatValue<0f||payload.FloatValue>1f){Reject(result,HorusResultCode.InvalidPayload,"Skill must be between 0 and 1.");return;}
+            bool aircraftEntry=entry.Def is AircraftDefinition||entry.Def.unitPrefab?.GetComponent<Aircraft>()!=null;
+            if(aircraftEntry&&(payload.FloatValue3<0f||payload.FloatValue3>1f)){Reject(result,HorusResultCode.InvalidPayload,"Aircraft bravery must be between 0 and 1.");return;}
+            if(entry.IsLiveOrdnance&&(payload.FloatValue2<0f||payload.FloatValue2>100000f||payload.FloatValue3<-89f||payload.FloatValue3>89f)){Reject(result,HorusResultCode.InvalidPayload,"Live Ordnance launch parameters are out of range.");return;}
+            if(!string.IsNullOrWhiteSpace(payload.UniqueName)&&UnitRegistry.customIDLookup.ContainsKey(payload.UniqueName)){Reject(result,HorusResultCode.InvalidPayload,"Unique name is already in use.");return;}
             string requestAcknowledgementKey=null;
             if(entry.IsLookupOnly)
             {
@@ -153,6 +164,7 @@ namespace HorusMod.Server
             };
             request.IncompatibleContentAcknowledgementKey=requestAcknowledgementKey;
             Unit linkedTarget=null;
+            if(payload.TargetUnitId!=0&&!TryUnit(payload.TargetUnitId,out _)){Reject(result,HorusResultCode.NotFound,"Target unit was not found.");return;}
             if (payload.TargetUnitId != 0 && TryUnit(payload.TargetUnitId, out Unit target))
             {
                 linkedTarget=target;
@@ -162,7 +174,7 @@ namespace HorusMod.Server
             {
                 var options = new AircraftSpawnOptions
                 {
-                    FuelRatio = payload.FloatValue2 > 0f ? Mathf.Clamp01(payload.FloatValue2) : 1f,
+                    FuelRatio = payload.FloatValue2 > 1f ? 1f : Mathf.Clamp01(payload.FloatValue2),
                     Livery = new LiveryKey(Math.Max(0, payload.IntValue)),
                     Skill = Mathf.Clamp01(payload.FloatValue),
                     Bravery = payload.FloatValue3 > 0f ? Mathf.Clamp01(payload.FloatValue3) : 0.575f
@@ -210,6 +222,7 @@ namespace HorusMod.Server
             UnitSnapshot snapshot=CaptureUnit(source);
             snapshot.Position=command.Payload.Points.Count==1?ResolveSpawnPosition(entry,ToGlobal(command.Payload.Points[0])):source.GlobalPosition()+new Vector3(20f,0f,20f);
             snapshot.CurrentId=0;
+            snapshot.WasHorusOwned=true;
             Unit duplicate=RestoreSnapshot(snapshot);
             result.AffectedUnitIds.Add(duplicate.persistentID.Id);
             Accept(result,"Duplicated "+(source.definition?.unitName??"unit")+".");
@@ -236,7 +249,7 @@ namespace HorusMod.Server
         private void Move(HorusCommandEnvelope command, HorusCommandResult result)
         {
             if (command.Payload.Points.Count != 1) { Reject(result, HorusResultCode.InvalidPayload, "Move requires one destination."); return; }
-            List<Unit> units = ResolveUnits(command.Payload.UnitIds);
+            List<Unit> units = ResolveMutableUnits(command.Payload.UnitIds);
             List<GlobalPosition> before=units.Select(unit=>unit.GlobalPosition()).ToList();
             GlobalPosition destination=ToGlobal(command.Payload.Points[0]);
             if (units.Count == 0 || !orders.IssueMove(units, ToGlobal(command.Payload.Points[0]), (HorusMod.Placement.FormationKind)Math.Max(0, command.Payload.IntValue)))
@@ -245,36 +258,38 @@ namespace HorusMod.Server
             PushUndo(()=>ApplyDestinations(units,before),()=>orders.IssueMove(units,destination,(HorusMod.Placement.FormationKind)Math.Max(0,command.Payload.IntValue)));
         }
 
-        private void Hold(HorusCommandEnvelope command, HorusCommandResult result) { List<Unit> units=ResolveUnits(command.Payload.UnitIds); if(units.Count==0){Reject(result,HorusResultCode.NotFound,"Units were not found.");return;} orders.SetHold(units,command.Payload.BoolValue);AddIds(result,units);Accept(result,"Hold state updated."); }
-        private void ClearOrders(HorusCommandEnvelope command, HorusCommandResult result) { List<Unit> units=ResolveUnits(command.Payload.UnitIds); if(units.Count==0){Reject(result,HorusResultCode.NotFound,"Units were not found.");return;} orders.ClearOrders(units);AddIds(result,units);Accept(result,"Orders cleared."); }
-        private void AttackTarget(HorusCommandEnvelope command, HorusCommandResult result) { List<Unit> units=ResolveUnits(command.Payload.UnitIds); if(!TryUnit(command.Payload.TargetUnitId,out Unit target)||!orders.IssueAttackTarget(units,target)){Reject(result,HorusResultCode.NativeFailure,"Attack target was rejected.");return;}AddIds(result,units);Accept(result,"Attack target accepted."); }
-        private void AttackMove(HorusCommandEnvelope command, HorusCommandResult result) { List<Unit> units=ResolveUnits(command.Payload.UnitIds); if(command.Payload.Points.Count!=1||!orders.IssueAttackMove(units,ToGlobal(command.Payload.Points[0]))){Reject(result,HorusResultCode.NativeFailure,"Attack-move was rejected.");return;}AddIds(result,units);Accept(result,"Attack-move accepted."); }
-        private void Patrol(HorusCommandEnvelope command, HorusCommandResult result) { List<Unit> units=ResolveUnits(command.Payload.UnitIds); var points=command.Payload.Points.Select(ToGlobal).ToList(); if(points.Count<2||!orders.IssuePatrol(units,points)){Reject(result,HorusResultCode.NativeFailure,"Patrol was rejected.");return;}AddIds(result,units);Accept(result,"Patrol accepted."); }
-        private void Guard(HorusCommandEnvelope command, HorusCommandResult result) { List<Unit> units=ResolveUnits(command.Payload.UnitIds); if(!TryUnit(command.Payload.TargetUnitId,out Unit target)||!orders.IssueGuard(units,target)){Reject(result,HorusResultCode.NativeFailure,"Guard was rejected.");return;}AddIds(result,units);Accept(result,"Guard accepted."); }
-        private void SetRules(HorusCommandEnvelope command, HorusCommandResult result) { if(!Enum.IsDefined(typeof(HorusRulesOfEngagement),command.Payload.IntValue)){Reject(result,HorusResultCode.InvalidPayload,"Rules of engagement value is invalid.");return;}List<Unit> units=ResolveUnits(command.Payload.UnitIds); if(units.Count==0){Reject(result,HorusResultCode.NotFound,"Units were not found.");return;} orders.SetRules(units,(HorusRulesOfEngagement)command.Payload.IntValue);AddIds(result,units);Accept(result,"Rules of engagement updated."); }
+        private void Hold(HorusCommandEnvelope command, HorusCommandResult result) { List<Unit> units=ResolveMutableUnits(command.Payload.UnitIds); if(units.Count==0){Reject(result,HorusResultCode.PolicyDenied,"No controllable Horus-owned units were supplied.");return;} orders.SetHold(units,command.Payload.BoolValue);AddIds(result,units);Accept(result,"Hold state updated."); }
+        private void ClearOrders(HorusCommandEnvelope command, HorusCommandResult result) { List<Unit> units=ResolveMutableUnits(command.Payload.UnitIds); if(units.Count==0){Reject(result,HorusResultCode.PolicyDenied,"No controllable Horus-owned units were supplied.");return;} orders.ClearOrders(units);AddIds(result,units);Accept(result,"Orders cleared."); }
+        private void AttackTarget(HorusCommandEnvelope command, HorusCommandResult result) { List<Unit> units=ResolveMutableUnits(command.Payload.UnitIds); if(units.Count==0){Reject(result,HorusResultCode.PolicyDenied,"No controllable Horus-owned units were supplied.");return;}if(!TryUnit(command.Payload.TargetUnitId,out Unit target)||!orders.IssueAttackTarget(units,target)){Reject(result,HorusResultCode.NativeFailure,"Attack target was rejected.");return;}AddIds(result,units);Accept(result,"Attack target accepted."); }
+        private void AttackMove(HorusCommandEnvelope command, HorusCommandResult result) { List<Unit> units=ResolveMutableUnits(command.Payload.UnitIds); if(units.Count==0){Reject(result,HorusResultCode.PolicyDenied,"No controllable Horus-owned units were supplied.");return;}if(command.Payload.Points.Count!=1||!orders.IssueAttackMove(units,ToGlobal(command.Payload.Points[0]))){Reject(result,HorusResultCode.NativeFailure,"Attack-move was rejected.");return;}AddIds(result,units);Accept(result,"Attack-move accepted."); }
+        private void Patrol(HorusCommandEnvelope command, HorusCommandResult result) { List<Unit> units=ResolveMutableUnits(command.Payload.UnitIds); if(units.Count==0){Reject(result,HorusResultCode.PolicyDenied,"No controllable Horus-owned units were supplied.");return;}var points=command.Payload.Points.Select(ToGlobal).ToList(); if(points.Count<2||!orders.IssuePatrol(units,points)){Reject(result,HorusResultCode.NativeFailure,"Patrol was rejected.");return;}AddIds(result,units);Accept(result,"Patrol accepted."); }
+        private void Guard(HorusCommandEnvelope command, HorusCommandResult result) { List<Unit> units=ResolveMutableUnits(command.Payload.UnitIds); if(units.Count==0){Reject(result,HorusResultCode.PolicyDenied,"No controllable Horus-owned units were supplied.");return;}if(!TryUnit(command.Payload.TargetUnitId,out Unit target)||!orders.IssueGuard(units,target)){Reject(result,HorusResultCode.NativeFailure,"Guard was rejected.");return;}AddIds(result,units);Accept(result,"Guard accepted."); }
+        private void SetRules(HorusCommandEnvelope command, HorusCommandResult result) { if(!Enum.IsDefined(typeof(HorusRulesOfEngagement),command.Payload.IntValue)){Reject(result,HorusResultCode.InvalidPayload,"Rules of engagement value is invalid.");return;}List<Unit> units=ResolveMutableUnits(command.Payload.UnitIds); if(units.Count==0){Reject(result,HorusResultCode.PolicyDenied,"No controllable Horus-owned units were supplied.");return;} orders.SetRules(units,(HorusRulesOfEngagement)command.Payload.IntValue);AddIds(result,units);Accept(result,"Rules of engagement updated."); }
 
         private void SetLoadout(HorusCommandEnvelope command, HorusCommandResult result)
         {
             if (command.Payload.UnitIds.Count != 1 || !TryUnit(command.Payload.UnitIds[0], out Unit unit) || !(unit is Aircraft aircraft)) { Reject(result, HorusResultCode.NotFound, "Aircraft was not found."); return; }
+            if(!CanMutateUnit(unit)){Reject(result,HorusResultCode.PolicyDenied,"Original mission unit mutation is disabled.");return;}
             if (string.Equals(command.Payload.SecondaryKey,"standard",StringComparison.OrdinalIgnoreCase))
             {
                 LoadoutApplyResult standard=HorusUnitEditor.TrySetLoadoutDetailed(aircraft,command.Payload.IntValue);
                 if(!standard.Success){Reject(result,HorusResultCode.InvalidPayload,standard.Message);return;}
                 result.AffectedUnitIds.Add(unit.persistentID.Id);Accept(result,"Standard loadout updated.");return;
             }
+            if(command.Payload.FloatValue<0f||command.Payload.FloatValue>1f){Reject(result,HorusResultCode.InvalidPayload,"Loadout fuel must be between 0 and 1.");return;}
             var draft = new LoadoutDraft(aircraft.definition?.jsonKey, LoadoutSourceKind.CustomHardpoints, command.Payload.MountKeys,
-                command.Payload.FloatValue > 0 ? command.Payload.FloatValue : aircraft.NetworkfuelLevel, command.Payload.IntValue, "dedicated", "Dedicated request");
+                command.Payload.FloatValue, command.Payload.IntValue, "dedicated", "Dedicated request");
             LoadoutApplyResult applied = HorusUnitEditor.TrySetLoadout(aircraft, draft);
             if (!applied.Success) { Reject(result, HorusResultCode.InvalidPayload, applied.Message); return; }
             result.AffectedUnitIds.Add(unit.persistentID.Id); Accept(result, "Loadout updated.");
         }
-        private void SetLivery(HorusCommandEnvelope command, HorusCommandResult result) { if(command.Payload.UnitIds.Count!=1||!TryUnit(command.Payload.UnitIds[0],out Unit unit)||!(unit is Aircraft aircraft)||!HorusUnitEditor.TrySetLivery(aircraft,command.Payload.IntValue)){Reject(result,HorusResultCode.InvalidPayload,"Livery was rejected.");return;}result.AffectedUnitIds.Add(unit.persistentID.Id);Accept(result,"Livery updated."); }
-        private void SetSkill(HorusCommandEnvelope command, HorusCommandResult result) { List<Unit> units=ResolveUnits(command.Payload.UnitIds);if(units.Count==0){Reject(result,HorusResultCode.NotFound,"Units were not found.");return;}foreach(Unit unit in units)HorusUnitEditor.SetSkill(unit,command.Payload.FloatValue);AddIds(result,units);Accept(result,"Skill updated."); }
-        private void SetFuel(HorusCommandEnvelope command, HorusCommandResult result) { if(command.Payload.UnitIds.Count!=1||!TryUnit(command.Payload.UnitIds[0],out Unit unit)||!(unit is Aircraft aircraft)){Reject(result,HorusResultCode.NotFound,"Aircraft was not found.");return;}aircraft.NetworkfuelLevel=Mathf.Clamp01(command.Payload.FloatValue);result.AffectedUnitIds.Add(unit.persistentID.Id);Accept(result,"Fuel updated."); }
-        private void SetBudget(HorusCommandEnvelope command, HorusCommandResult result, bool adjust) { if(!FactionSlot.Resolve(command.Payload.FactionIndex).IsValid){Reject(result,HorusResultCode.InvalidPayload,"Faction index is invalid.");return;}if(!adjust&&command.Payload.FloatValue<0f){Reject(result,HorusResultCode.InvalidPayload,"Budget cannot be negative.");return;}if(adjust)RtsEconomyManager.Instance.AdjustBudget(command.Payload.FactionIndex,command.Payload.FloatValue);else RtsEconomyManager.Instance.SetBudget(command.Payload.FactionIndex,command.Payload.FloatValue);Accept(result,adjust?"Budget adjusted.":"Budget set."); }
+        private void SetLivery(HorusCommandEnvelope command, HorusCommandResult result) { if(command.Payload.UnitIds.Count!=1||!TryUnit(command.Payload.UnitIds[0],out Unit unit)||!(unit is Aircraft aircraft)){Reject(result,HorusResultCode.NotFound,"Aircraft was not found.");return;}if(!CanMutateUnit(unit)){Reject(result,HorusResultCode.PolicyDenied,"Original mission unit mutation is disabled.");return;}if(!HorusUnitEditor.TrySetLivery(aircraft,command.Payload.IntValue)){Reject(result,HorusResultCode.InvalidPayload,"Livery was rejected.");return;}result.AffectedUnitIds.Add(unit.persistentID.Id);Accept(result,"Livery updated."); }
+        private void SetSkill(HorusCommandEnvelope command, HorusCommandResult result) { if(command.Payload.FloatValue<0f||command.Payload.FloatValue>1f){Reject(result,HorusResultCode.InvalidPayload,"Skill must be between 0 and 1.");return;}List<Unit> units=ResolveMutableUnits(command.Payload.UnitIds);if(units.Count==0){Reject(result,HorusResultCode.PolicyDenied,"No editable Horus-owned units were supplied.");return;}foreach(Unit unit in units)HorusUnitEditor.SetSkill(unit,command.Payload.FloatValue);AddIds(result,units);Accept(result,"Skill updated."); }
+        private void SetFuel(HorusCommandEnvelope command, HorusCommandResult result) { if(command.Payload.FloatValue<0f||command.Payload.FloatValue>1f){Reject(result,HorusResultCode.InvalidPayload,"Fuel must be between 0 and 1.");return;}if(command.Payload.UnitIds.Count!=1||!TryUnit(command.Payload.UnitIds[0],out Unit unit)||!(unit is Aircraft aircraft)){Reject(result,HorusResultCode.NotFound,"Aircraft was not found.");return;}if(!CanMutateUnit(unit)){Reject(result,HorusResultCode.PolicyDenied,"Original mission unit mutation is disabled.");return;}aircraft.NetworkfuelLevel=command.Payload.FloatValue;result.AffectedUnitIds.Add(unit.persistentID.Id);Accept(result,"Fuel updated."); }
+        private void SetBudget(HorusCommandEnvelope command, HorusCommandResult result, bool adjust) { if(!FactionSlot.Resolve(command.Payload.FactionIndex).IsValid){Reject(result,HorusResultCode.InvalidPayload,"Faction index is invalid.");return;}if(RtsEconomyManager.Instance.GetFactionState(command.Payload.FactionIndex)==null){Reject(result,HorusResultCode.PolicyDenied,"RTS economy is not initialized.");return;}float next=adjust?RtsEconomyManager.Instance.GetBudget(command.Payload.FactionIndex)+command.Payload.FloatValue:command.Payload.FloatValue;if(next<0f||next>1000000000f){Reject(result,HorusResultCode.InvalidPayload,"Budget result must be between 0 and 1,000,000,000.");return;}if(adjust)RtsEconomyManager.Instance.AdjustBudget(command.Payload.FactionIndex,command.Payload.FloatValue);else RtsEconomyManager.Instance.SetBudget(command.Payload.FactionIndex,command.Payload.FloatValue);Accept(result,adjust?"Budget adjusted.":"Budget set."); }
         private void SetRtsMode(HorusCommandEnvelope command,HorusCommandResult result){if(!Enum.IsDefined(typeof(HorusMode),command.Payload.IntValue)){Reject(result,HorusResultCode.InvalidPayload,"RTS mode is invalid.");return;}HorusMode mode=(HorusMode)command.Payload.IntValue;if(mode==HorusMode.RtsCommander){RtsEconomyManager.Instance.CurrentMode=mode;RtsEconomyManager.Instance.InitializeMatch();}else{RtsEconomyManager.Instance.ResetMatch();RtsEconomyManager.Instance.CurrentMode=mode;}Accept(result,"RTS mode updated.");}
         private void SetRtsDeployMode(HorusCommandEnvelope command,HorusCommandResult result){if(!Enum.IsDefined(typeof(RtsDeployMode),command.Payload.IntValue)){Reject(result,HorusResultCode.InvalidPayload,"RTS deployment mode is invalid.");return;}RtsEconomyManager.Instance.DeployMode=(RtsDeployMode)command.Payload.IntValue;Accept(result,"RTS deployment mode updated.");}
-        private void AdjustUnitCap(HorusCommandEnvelope command,HorusCommandResult result){if(!FactionSlot.Resolve(command.Payload.FactionIndex).IsValid||command.Payload.IntValue==0||Math.Abs((long)command.Payload.IntValue)>1000){Reject(result,HorusResultCode.InvalidPayload,"Unit-cap adjustment is invalid.");return;}RtsEconomyManager.Instance.AdjustUnitCap(command.Payload.FactionIndex,command.Payload.IntValue);Accept(result,"RTS unit cap adjusted.");}
+        private void AdjustUnitCap(HorusCommandEnvelope command,HorusCommandResult result){FactionEconomyState factionState=RtsEconomyManager.Instance.GetFactionState(command.Payload.FactionIndex);if(!FactionSlot.Resolve(command.Payload.FactionIndex).IsValid||factionState==null||command.Payload.IntValue==0||Math.Abs((long)command.Payload.IntValue)>1000||(long)factionState.UnitCap+command.Payload.IntValue<0||(long)factionState.UnitCap+command.Payload.IntValue>100000){Reject(result,HorusResultCode.InvalidPayload,"Unit-cap adjustment is invalid.");return;}RtsEconomyManager.Instance.AdjustUnitCap(command.Payload.FactionIndex,command.Payload.IntValue);Accept(result,"RTS unit cap adjusted.");}
 
         private void CreateFactory(HorusCommandEnvelope command, HorusCommandResult result)
         {
@@ -296,7 +311,7 @@ namespace HorusMod.Server
                 case FactoryAction.Enable:RtsFactoryManager.Instance.SetFactoryEnabled(factory,command.Payload.BoolValue);break;
                 case FactoryAction.Production:RtsFactoryManager.Instance.SetFactoryProductionEnabled(factory,command.Payload.BoolValue);break;
                 case FactoryAction.Consumes:RtsFactoryManager.Instance.SetFactoryConsumesBudget(factory,command.Payload.BoolValue);break;
-                case FactoryAction.Queue:UnitEntry entry=UnitCatalog.Find(command.Payload.DefinitionKey);if(entry?.Def==null){Reject(result,HorusResultCode.NotFound,"Queue definition was not found.");return;}if(factory.productionUnitKeys.Count>=HorusProtocol.MaxEntitiesPerCommand||!RtsFactoryManager.Instance.CanQueueDefinition(factory,entry.Def)){Reject(result,HorusResultCode.PolicyDenied,"Definition is incompatible with this factory or its queue is full.");return;}RtsFactoryManager.Instance.AddUnitToProductionQueue(factory,entry.Def);break;
+                case FactoryAction.Queue:UnitEntry entry=ResolveCatalogEntry(command.Payload.DefinitionKey,command.Payload.SecondaryKey);if(entry?.Def==null||UnitCatalog.FindAll(entry.Def.jsonKey).Count!=1){Reject(result,HorusResultCode.NotFound,"Queue definition was not found or its persistent key is ambiguous.");return;}IEnumerable<string> candidateKeys=factory.productionUnitKeys.Concat(new[]{entry.Def.jsonKey??""});if(!HorusPersistencePolicy.IsSafeStringCollection(candidateKeys,HorusProtocol.MaxEntitiesPerCommand,out _)||!RtsFactoryManager.Instance.CanQueueDefinition(factory,entry.Def)){Reject(result,HorusResultCode.PolicyDenied,"Definition is incompatible with this factory or its queue is full.");return;}RtsFactoryManager.Instance.AddUnitToProductionQueue(factory,entry.Def);break;
                 case FactoryAction.RemoveQueue:if(command.Payload.IntValue<0||command.Payload.IntValue>=factory.productionUnitKeys.Count){Reject(result,HorusResultCode.InvalidPayload,"Factory queue index is invalid.");return;}RtsFactoryManager.Instance.RemoveProductionQueueItem(factory,command.Payload.IntValue);break;
                 case FactoryAction.ClearQueue:RtsFactoryManager.Instance.ClearProductionQueue(factory);break;
                 case FactoryAction.SetRally:if(command.Payload.Points.Count!=1){Reject(result,HorusResultCode.InvalidPayload,"Rally requires one position.");return;}HorusVector3 p=command.Payload.Points[0];RtsFactoryManager.Instance.SetRallyPoint(factory,new Vector3(p.X,p.Y,p.Z));break;
@@ -312,8 +327,15 @@ namespace HorusMod.Server
         }
         private void PushUndo(Action undoAction, Action redoAction) { if(replaying||undoAction==null||redoAction==null)return; undo.Push(new JournalEntry{Undo=undoAction,Redo=redoAction}); if(undo.Count>128){var keep=undo.Take(128).Reverse().ToArray();undo.Clear();foreach(JournalEntry entry in keep)undo.Push(entry);} }
 
+        private static void CompletePersistence(HorusCommandResult result,string successMessage)
+        {
+            if(RtsFactoryManager.Instance.LastPersistenceSucceeded)Accept(result,successMessage);
+            else Reject(result,HorusResultCode.NativeFailure,RtsFactoryManager.Instance.LastPersistenceMessage);
+        }
+
         private static bool TryUnit(uint id,out Unit unit)=>UnitRegistry.TryGetUnit(new PersistentID{Id=id},out unit);
-        private static List<Unit> ResolveUnits(List<uint> ids){var result=new List<Unit>();foreach(uint id in ids)if(TryUnit(id,out Unit unit)&&unit!=null)result.Add(unit);return result;}
+        private List<Unit> ResolveMutableUnits(List<uint> ids){var result=new List<Unit>();foreach(uint id in ids)if(TryUnit(id,out Unit unit)&&unit!=null&&CanMutateUnit(unit))result.Add(unit);return result;}
+        private bool CanMutateUnit(Unit unit)=>unit!=null&&HorusOwnershipPolicy.CanMutate(state.IsHorusOwned(unit.persistentID.Id),allowMissionUnitMutation);
         private static void AddIds(HorusCommandResult result,List<Unit> units){foreach(Unit unit in units)if(unit!=null)result.AffectedUnitIds.Add(unit.persistentID.Id);}
         private static GlobalPosition ToGlobal(HorusVector3 p)=>new GlobalPosition(p.X,p.Y,p.Z);
         private static HorusVector3 ToWire(GlobalPosition p)=>new HorusVector3(p.x,p.y,p.z);
@@ -359,7 +381,7 @@ namespace HorusMod.Server
         private static bool Finite(float value)=>!float.IsNaN(value)&&!float.IsInfinity(value);
         private UnitSnapshot CaptureUnit(Unit unit)
         {
-            var snapshot=new UnitSnapshot{Definition=unit.definition,Position=unit.GlobalPosition(),Rotation=unit.transform.rotation,HQ=unit.NetworkHQ,Skill=1f,Bravery=0.575f,Fuel=1f,CurrentId=unit.persistentID.Id};
+            var snapshot=new UnitSnapshot{Definition=unit.definition,Position=unit.GlobalPosition(),Rotation=unit.transform.rotation,HQ=unit.NetworkHQ,Skill=1f,Bravery=0.575f,Fuel=1f,CurrentId=unit.persistentID.Id,WasHorusOwned=state.IsHorusOwned(unit.persistentID.Id)};
             if(unit is Aircraft aircraft){snapshot.Skill=aircraft.skill;snapshot.Bravery=aircraft.bravery;snapshot.Fuel=aircraft.NetworkfuelLevel;snapshot.Livery=aircraft.NetworkLiveryKey.Index;snapshot.Loadout=HorusLoadoutService.CloneLoadout(aircraft.Networkloadout);}
             else if(unit is GroundVehicle vehicle){snapshot.Skill=vehicle.skill;}
             else if(unit is Ship ship){snapshot.Skill=ship.skill;}
@@ -372,13 +394,13 @@ namespace HorusMod.Server
             if(snapshot.Definition is AircraftDefinition||snapshot.Definition.unitPrefab?.GetComponent<Aircraft>()!=null)request.Aircraft=new AircraftSpawnOptions{Loadout=HorusLoadoutService.CloneLoadout(snapshot.Loadout),FuelRatio=snapshot.Fuel,Livery=new LiveryKey(snapshot.Livery),Skill=snapshot.Skill,Bravery=snapshot.Bravery};
             HorusSpawnResult result=HorusSpawnService.Spawn(request);
             if(!result.Success||result.Unit==null)throw new InvalidOperationException("Journal respawn failed: "+result.Message);
-            snapshot.CurrentId=result.Unit.persistentID.Id;state.RecordSpawn(snapshot.CurrentId);return result.Unit;
+            snapshot.CurrentId=result.Unit.persistentID.Id;if(snapshot.WasHorusOwned)state.RecordSpawn(snapshot.CurrentId);return result.Unit;
         }
         private void RemoveSnapshot(UnitSnapshot snapshot){if(snapshot!=null&&TryUnit(snapshot.CurrentId,out Unit unit)){DeleteUnit(unit);state.RecordDelete(snapshot.CurrentId);}}
         private static void ApplyDestinations(List<Unit> units,List<GlobalPosition> destinations){for(int i=0;i<units.Count&&i<destinations.Count;i++)if(units[i]!=null)HorusOrders.TrySetDestination(units[i],destinations[i],false,out _);}
         private static void DeleteUnit(Unit unit){if(unit==null)return;if(NetworkManagerNuclearOption.i?.ServerObjectManager!=null&&unit.Identity!=null)NetworkManagerNuclearOption.i.ServerObjectManager.Destroy(unit.Identity);else UnityEngine.Object.Destroy(unit.gameObject);}
         private HorusCommandResult NewResult(HorusCommandEnvelope command)=>new HorusCommandResult{RequestId=command.RequestId,Command=command.Command,Result=HorusResultCode.InternalError,SessionId=state.SessionId,Revision=state.Revision};
-        private static void Accept(HorusCommandResult result,string message){result.Result=HorusResultCode.Accepted;result.Message=message;}
-        private static void Reject(HorusCommandResult result,HorusResultCode code,string message){result.Result=code;result.Message=message;}
+        private static void Accept(HorusCommandResult result,string message){result.Result=HorusResultCode.Accepted;result.Message=HorusWireText.SanitizeVisible(message);}
+        private static void Reject(HorusCommandResult result,HorusResultCode code,string message){result.Result=code;result.Message=HorusWireText.SanitizeVisible(message);}
     }
 }

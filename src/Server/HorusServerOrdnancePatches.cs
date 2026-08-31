@@ -27,6 +27,7 @@ namespace HorusMod.Server
 
         private static bool MissileLocalStartPrefix(Missile __instance)
         {
+            if(!HorusMod.HorusPlugin.IsRuntimeEnabled)return true;
             if(__instance==null||__instance.GetComponent<MissileSeeker>()!=null)return true;
             if(GameManager.gameState==GameState.SinglePlayer||GameManager.gameState==GameState.Multiplayer)
             {
@@ -41,10 +42,11 @@ namespace HorusMod.Server
         private static readonly FieldInfo TargetUnitField=typeof(MissileSeeker).GetField("targetUnit",BindingFlags.NonPublic|BindingFlags.Instance);
         private static readonly FieldInfo MissileField=typeof(MissileSeeker).GetField("missile",BindingFlags.NonPublic|BindingFlags.Instance);
         private static bool HasNoTarget(MissileSeeker seeker)=>seeker!=null&&TargetUnitField!=null&&TargetUnitField.GetValue(seeker)==null;
-        private static bool ArhSlowChecksPrefix(ARHSeeker __instance)=>!HasNoTarget(__instance);
-        private static bool OpticalPreTerminalPrefix(OpticalSeekerCruiseMissile __instance)=>!HasNoTarget(__instance);
+        private static bool ArhSlowChecksPrefix(ARHSeeker __instance)=>!HorusMod.HorusPlugin.IsRuntimeEnabled||!HasNoTarget(__instance);
+        private static bool OpticalPreTerminalPrefix(OpticalSeekerCruiseMissile __instance)=>!HorusMod.HorusPlugin.IsRuntimeEnabled||!HasNoTarget(__instance);
         private static bool OpticalSlowChecksPrefix(OpticalSeekerCruiseMissile __instance)
         {
+            if(!HorusMod.HorusPlugin.IsRuntimeEnabled)return true;
             if(!HasNoTarget(__instance))return true;
             Missile missile=MissileField?.GetValue(__instance) as Missile;
             if(missile==null||missile.disabled)return false;

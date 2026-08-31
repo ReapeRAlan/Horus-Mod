@@ -18,6 +18,8 @@ namespace HorusMod
         public static ConfigEntry<bool> EnableStrictBaseDeployment { get; internal set; }
         public static ConfigEntry<float> BaseDeploymentRadius { get; internal set; }
         public static ConfigEntry<float> ShipSpawnLift { get; internal set; }
+        public static ConfigEntry<bool> ServerEnabled { get; internal set; }
+        public static bool IsRuntimeEnabled => ServerEnabled?.Value == true;
     }
 }
 

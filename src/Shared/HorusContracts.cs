@@ -11,6 +11,11 @@ namespace HorusMod.Shared
         public const int MaxWaypointsPerCommand = 32;
         public const int MaxStringBytes = 512;
         public const int MaxMounts = 64;
+        public const int MaxStringListBytes = 8 * 1024;
+        public const int MaxSnapshotPages = 16 * 1024;
+        public const int MaxSnapshotUnitsPerPage = 8;
+        public const int MaxSnapshotFactoriesPerPage = 1;
+        public const int MaxSnapshotBudgetsPerPage = 64;
     }
 
     public enum HorusPacketKind : byte

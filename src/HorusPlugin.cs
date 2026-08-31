@@ -59,6 +59,7 @@ namespace HorusMod
         public static ConfigEntry<HorusLogLevel> LogVerbosity { get; private set; }
         public static ConfigEntry<bool> ShowDebugTab { get; private set; }
         public static ConfigEntry<bool> ImproveAIBombingAccuracy { get; private set; }
+        public static bool IsRuntimeEnabled => true;
 
         private void Awake()
         {

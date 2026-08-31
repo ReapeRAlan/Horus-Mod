@@ -58,6 +58,7 @@ namespace HorusMod.Interaction
 
         private static bool ShouldAllowRelease(Pilot pilot)
         {
+            if (!HorusPlugin.IsRuntimeEnabled) return true;
             if (HorusPlugin.ImproveAIBombingAccuracy == null || !HorusPlugin.ImproveAIBombingAccuracy.Value) return true;
             Aircraft aircraft = pilot?.aircraft;
             if (aircraft == null || aircraft.Player != null || !aircraft.IsServer || aircraft.rb == null || aircraft.weaponManager == null)

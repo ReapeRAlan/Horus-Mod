@@ -1,9 +1,9 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text;
-using System.Text.RegularExpressions;
 using UnityEngine;
 #if HORUS_CLIENT
 using HorusMod.Client;
@@ -213,17 +213,21 @@ namespace HorusMod.Economy
                 return;
             }
 
-            float cost = economyManager.GetUnitCost(def);
             bool consumes = config.settings.productionConsumesBudget && factory.consumeBudgetForProduction;
-            if (consumes)
+            RtsTransaction transaction = consumes ? economyManager.CreateTransaction(def, factory.factionId) : null;
+            if (consumes && !transaction.IsValid)
             {
-                float currentBudget = economyManager.GetBudget(factory.factionId);
-                if (currentBudget < cost)
-                {
-                    factory.lastStatus = $"Insufficient budget ({currentBudget:F0}/{cost:F0})";
-                    LogBlocked(factory, "production-budget", "[HORUS RTS] Factory production blocked: insufficient budget");
-                    return;
-                }
+                factory.lastStatus = transaction.DenialReason;
+                LogBlocked(factory, "production-budget", "[HORUS RTS] Factory production blocked: " + transaction.DenialReason);
+                return;
+            }
+            var factionState = economyManager.GetFactionState(factory.factionId);
+            if (!consumes && HorusPlugin.EnableRtsUnitCap?.Value == true && factionState != null &&
+                factionState.UnitCap > 0 && factionState.ActiveUnitCount >= factionState.UnitCap)
+            {
+                factory.lastStatus = "Unit cap reached";
+                LogBlocked(factory, "production-unit-cap", "[HORUS RTS] Factory production blocked: faction unit cap reached");
+                return;
             }
 
             factory.productionTimer += Time.deltaTime;
@@ -245,21 +249,19 @@ namespace HorusMod.Economy
 
             factory.activeProducedUnits.Add(spawned);
 
-            var factionState = economyManager.GetFactionState(factory.factionId);
-            if (factionState != null)
+            if (consumes)
+            {
+                economyManager.CommitTransaction(transaction, spawned);
+            }
+            else if (factionState != null)
             {
                 factionState.TrackedUnits.Add(spawned);
                 factionState.ActiveUnitCount = factionState.TrackedUnits.Count;
             }
 
-            if (consumes)
-            {
-                economyManager.AdjustBudget(factory.factionId, -cost);
-            }
-
             float remainingBudget = economyManager.GetBudget(factory.factionId);
             factory.lastStatus = $"Produced {def.unitName}";
-            HorusLog.Info("Factory", $"[HORUS RTS] Factory produced: {def.unitName} cost={cost:F0} remaining={remainingBudget:F0}");
+            HorusLog.Info("Factory", $"[HORUS RTS] Factory produced: {def.unitName} cost={(transaction?.Cost ?? 0f):F0} remaining={remainingBudget:F0}");
             AdvanceQueue(factory);
         }
 
@@ -1423,7 +1425,7 @@ namespace HorusMod.Economy
         public void AddUnitToProductionQueue(RtsFactory factory, UnitDefinition unitDefinition)
         {
 #if HORUS_CLIENT
-            if (HorusRemoteAuthority.IsRemoteSession) { if(factory!=null&&unitDefinition!=null)HorusRemoteAuthority.TrySubmit(HorusCommandKind.QueueFactoryUnit,new HorusCommandPayload{FactoryId=factory.id??"",DefinitionKey=unitDefinition.jsonKey??""});return; }
+            if (HorusRemoteAuthority.IsRemoteSession) { if(factory!=null&&unitDefinition!=null){UnitEntry remoteEntry=UnitCatalog.FindByDefinition(unitDefinition);HorusRemoteAuthority.TrySubmit(HorusCommandKind.QueueFactoryUnit,new HorusCommandPayload{FactoryId=factory.id??"",DefinitionKey=unitDefinition.jsonKey??"",SecondaryKey=remoteEntry?.Source??""});}return; }
 #endif
             if (!CanMutateFactories("add unit to production queue")) return;
             CatalogEntry entry = HorusManager.FindCatalogEntry(unitDefinition);
@@ -1611,16 +1613,18 @@ namespace HorusMod.Economy
 
         private bool NormalizeConfig(RtsFactoriesConfig cfg)
         {
-            if (cfg == null) return false;
+            if (cfg == null) throw new InvalidDataException("Factory config is null.");
             bool changed = false;
             if (cfg.version < 1) { cfg.version = 1; changed = true; }
+            if (cfg.version > 1) throw new InvalidDataException("Factory config version is unsupported.");
             if (cfg.settings == null) { cfg.settings = new RtsFactoriesSettings(); changed = true; }
-            if (cfg.settings.maxFactoriesPerFaction <= 0)
+            if (!HorusFactoryPolicy.IsValidFactoryLimit(cfg.settings.maxFactoriesPerFaction))
             {
                 cfg.settings.maxFactoriesPerFaction = 10;
                 changed = true;
             }
             if (cfg.factoryPresets == null) { cfg.factoryPresets = new List<FactoryPreset>(); changed = true; }
+            if (cfg.factoryPresets.Count > HorusFactoryPolicy.MaxPresets) throw new InvalidDataException("Factory preset count exceeds the supported limit.");
 
             var defaults = GetDefaultPresets();
             foreach (var defaultPreset in defaults)
@@ -1656,9 +1660,15 @@ namespace HorusMod.Economy
 
             foreach (var preset in cfg.factoryPresets)
             {
+                if (preset == null || string.IsNullOrWhiteSpace(preset.presetName) || !HorusWireText.IsStableKey(preset.presetName)) throw new InvalidDataException("Factory preset name is invalid.");
                 if (preset.productionUnitKeys == null) { preset.productionUnitKeys = new List<string>(); changed = true; }
+                if (!Enum.TryParse(preset.type, true, out RtsFactoryType type) || !Enum.IsDefined(typeof(RtsFactoryType), type)) throw new InvalidDataException("Factory preset type is invalid.");
+                if (!HorusFactoryPolicy.IsValidIncome(preset.incomePerMinute) || !HorusFactoryPolicy.IsValidProduction(preset.productionIntervalSeconds, preset.maxActiveProducedUnits, preset.produceUnits)) throw new InvalidDataException("Factory preset numeric state is invalid.");
+                if (!HorusPersistencePolicy.IsSafeStringCollection(preset.productionUnitKeys, HorusProtocol.MaxEntitiesPerCommand, out _)) throw new InvalidDataException("Factory preset queue is invalid or oversized.");
+                if (string.IsNullOrWhiteSpace(preset.visualBuilding) || !HorusWireText.IsStableKey(preset.visualBuilding)) throw new InvalidDataException("Factory visual building key is invalid.");
                 HorusLog.Info("Factory", $"[HORUS RTS] Factory preset loaded: {preset.presetName} visual={preset.visualBuilding}");
             }
+            if (cfg.factoryPresets.Select(p => p.presetName).Distinct(StringComparer.OrdinalIgnoreCase).Count() != cfg.factoryPresets.Count) throw new InvalidDataException("Factory preset names must be unique.");
             return changed;
         }
 
@@ -1695,56 +1705,25 @@ namespace HorusMod.Economy
 
         private static RtsFactoriesConfig LoadConfig(string path)
         {
-            var cfg = new RtsFactoriesConfig
-            {
-                settings = new RtsFactoriesSettings(),
-                factoryPresets = GetDefaultPresets()
-            };
-
+            var cfg = new RtsFactoriesConfig { version = 1, settings = new RtsFactoriesSettings(), factoryPresets = new List<FactoryPreset>() };
             if (!File.Exists(path)) return cfg;
-
-            try
+            long length = new FileInfo(path).Length;
+            if (length < 0 || length > HorusEconomyPolicy.MaxConfigFileBytes) throw new InvalidDataException("Factory config file is oversized.");
+            using (var stringReader = new StringReader(File.ReadAllText(path)))
+            using (var jsonReader = new Newtonsoft.Json.JsonTextReader(stringReader) { MaxDepth = 32, DateParseHandling = Newtonsoft.Json.DateParseHandling.None })
             {
-                string text = File.ReadAllText(path);
-                
-                // Parse settings block
-                var settingsMatch = Regex.Match(text, @"""settings""\s*:\s*\{([^}]+)\}");
-                if (settingsMatch.Success)
+                var root = Newtonsoft.Json.Linq.JObject.Load(jsonReader, new Newtonsoft.Json.Linq.JsonLoadSettings { DuplicatePropertyNameHandling = Newtonsoft.Json.Linq.DuplicatePropertyNameHandling.Error });
+                cfg.version = root.Value<int?>("version") ?? 1;
+                Newtonsoft.Json.Linq.JToken settingsToken = root["settings"];
+                if (settingsToken != null) cfg.settings = settingsToken.ToObject<RtsFactoriesSettings>() ?? throw new InvalidDataException("Factory settings are invalid.");
+                if (!(root["factoryPresets"] is Newtonsoft.Json.Linq.JObject presets)) throw new InvalidDataException("Factory presets must be a named object.");
+                if (presets.Count > HorusFactoryPolicy.MaxPresets) throw new InvalidDataException("Factory preset count exceeds the supported limit.");
+                foreach (var property in presets.Properties())
                 {
-                    string settingsJson = "{" + settingsMatch.Groups[1].Value + "}";
-                    var loadedSettings = Newtonsoft.Json.JsonConvert.DeserializeObject<RtsFactoriesSettings>(settingsJson);
-                    if (loadedSettings != null) cfg.settings = loadedSettings;
-                }
-
-                // Parse factoryPresets block
-                var presetsMatch = Regex.Match(text, @"""factoryPresets""\s*:\s*\{([\s\S]+)\}\s*\}");
-                if (presetsMatch.Success)
-                {
-                    string presetsContent = presetsMatch.Groups[1].Value;
-                    var presetMatches = Regex.Matches(presetsContent, @"""([^""]+)""\s*:\s*\{([^}]+)\}");
-                    if (presetMatches.Count > 0)
-                    {
-                        cfg.factoryPresets.Clear();
-                        foreach (Match m in presetMatches)
-                        {
-                            string presetName = m.Groups[1].Value;
-                            string body = m.Groups[2].Value;
-                            string presetJson = "{" + body + "}";
-                            var preset = Newtonsoft.Json.JsonConvert.DeserializeObject<FactoryPreset>(presetJson);
-                            if (preset != null)
-                            {
-                                preset.presetName = presetName;
-                                cfg.factoryPresets.Add(preset);
-                            }
-                        }
-                    }
+                    FactoryPreset preset = property.Value.ToObject<FactoryPreset>() ?? throw new InvalidDataException("Factory preset is invalid.");
+                    preset.presetName = property.Name;cfg.factoryPresets.Add(preset);
                 }
             }
-            catch (Exception ex)
-            {
-                HorusLog.Warning("Factory", $"[HORUS RTS] Failed to parse factory config: {ex.Message}. Using defaults.");
-            }
-
             return cfg;
         }
 
@@ -1770,9 +1749,9 @@ namespace HorusMod.Economy
                 var preset = cfg.factoryPresets[i];
                 sb.AppendLine($"    \"{EscapeJson(preset.presetName)}\": {{");
                 sb.AppendLine($"      \"type\": \"{EscapeJson(preset.type)}\",");
-                sb.AppendLine($"      \"incomePerMinute\": {preset.incomePerMinute},");
+                sb.AppendLine($"      \"incomePerMinute\": {preset.incomePerMinute.ToString("R", CultureInfo.InvariantCulture)},");
                 sb.AppendLine($"      \"produceUnits\": {(preset.produceUnits ? "true" : "false")},");
-                sb.AppendLine($"      \"productionIntervalSeconds\": {preset.productionIntervalSeconds},");
+                sb.AppendLine($"      \"productionIntervalSeconds\": {preset.productionIntervalSeconds.ToString("R", CultureInfo.InvariantCulture)},");
                 sb.AppendLine($"      \"maxActiveProducedUnits\": {preset.maxActiveProducedUnits},");
                 sb.AppendLine($"      \"visualBuilding\": \"{EscapeJson(preset.visualBuilding)}\",");
                 sb.Append("      \"productionUnitKeys\": [");
@@ -1813,6 +1792,7 @@ namespace HorusMod.Economy
         {
             try
             {
+                if (activeFactories.Count > HorusEconomyPolicy.MaxConfigEntries) throw new InvalidDataException("Factory count exceeds the persistence limit.");
                 Directory.CreateDirectory(ConfigDir);
                 var serializableList = new SerializableFactoryList();
                 foreach (var f in activeFactories)
@@ -1841,27 +1821,63 @@ namespace HorusMod.Economy
 
         private void LoadInstancesInternal()
         {
-            activeFactories.Clear();
             if (!File.Exists(InstancesPath)) return;
             try
             {
-                string json = File.ReadAllText(InstancesPath);
-                var list = JsonUtility.FromJson<SerializableFactoryList>(json);
-                if (list != null && list.factories != null)
+                long length = new FileInfo(InstancesPath).Length;
+                if (length < 0 || length > HorusEconomyPolicy.MaxConfigFileBytes) throw new InvalidDataException("Factory instance file is oversized.");
+                var list = Newtonsoft.Json.JsonConvert.DeserializeObject<SerializableFactoryList>(File.ReadAllText(InstancesPath), new Newtonsoft.Json.JsonSerializerSettings { MaxDepth = 32 });
+                if (list == null || list.factories == null || list.factories.Count > HorusEconomyPolicy.MaxConfigEntries) throw new InvalidDataException("Factory instance collection is invalid or oversized.");
+                var restored = new List<RtsFactory>();
+                var ids = new HashSet<string>(StringComparer.Ordinal);
+                var factionCounts = new Dictionary<int, int>();
+                foreach (SerializableFactory sf in list.factories)
                 {
-                    foreach (var sf in list.factories)
-                    {
-                        var factory = ToRuntime(sf);
-                        NormalizeLoadedFactory(factory);
-                        activeFactories.Add(factory);
-                    }
-                    HorusLog.Info("Factory", $"[HORUS RTS] Factory loaded: count={activeFactories.Count}");
+                    RtsFactory factory = RestoreValidatedClientFactory(sf, ids);
+                    int count = factionCounts.TryGetValue(factory.factionId, out int existing) ? existing + 1 : 1;
+                    if (count > config.settings.maxFactoriesPerFaction) throw new InvalidDataException("Persisted faction factory limit exceeded.");
+                    factionCounts[factory.factionId] = count;restored.Add(factory);
                 }
+                foreach (RtsFactory existing in activeFactories) DestroyVirtualAnchorForReload(existing);
+                activeFactories.Clear();activeFactories.AddRange(restored);
+                HorusLog.Info("Factory", $"[HORUS RTS] Factory loaded: count={activeFactories.Count}");
             }
             catch (Exception ex)
             {
-                HorusLog.Error("Factory", $"[HORUS RTS] Failed to load factory instances: {ex.Message}");
+                HorusLog.Error("Factory", $"[HORUS RTS] Factory instance load rejected; current state was preserved: {ex.Message}");
             }
+        }
+
+        private RtsFactory RestoreValidatedClientFactory(SerializableFactory value, HashSet<string> ids)
+        {
+            if (value == null || string.IsNullOrWhiteSpace(value.id) || !HorusWireText.IsStableKey(value.id) || !ids.Add(value.id)) throw new InvalidDataException("Persisted factory id is invalid or duplicated.");
+            if (!CanUseFactoryFaction(value.factionId, out _)) throw new InvalidDataException("Persisted factory faction is invalid.");
+            if (!HorusPersistencePolicy.IsSafePosition(value.globalX, value.globalY, value.globalZ) || !HorusPersistencePolicy.IsSafePosition(value.rallyX, value.rallyY, value.rallyZ)) throw new InvalidDataException("Persisted factory position is invalid.");
+            if (!HorusFactoryPolicy.IsValidRuntimeNumbers(value.yaw, value.incomePerMinute, value.productionIntervalSeconds, value.productionTimer, value.maxActiveProducedUnits, value.spawnRadius, value.produceUnits)) throw new InvalidDataException("Persisted factory numeric state is invalid.");
+            FactoryPreset preset = config.factoryPresets.FirstOrDefault(item => string.Equals(item.presetName, value.presetName ?? value.displayName, StringComparison.OrdinalIgnoreCase));
+            if (preset == null) throw new InvalidDataException("Persisted factory preset is unknown.");
+            List<string> keys = value.productionUnitKeys ?? new List<string>();
+            if (!HorusPersistencePolicy.IsSafeStringCollection(keys, HorusProtocol.MaxEntitiesPerCommand, out _)) throw new InvalidDataException("Persisted factory queue is invalid or oversized.");
+            RtsFactory restored = ToRuntime(value);restored.factoryType = (RtsFactoryType)Enum.Parse(typeof(RtsFactoryType), preset.type, true);restored.presetName = preset.presetName;restored.displayName = preset.presetName;restored.visualBuilding = preset.visualBuilding;restored.lastStatus = HorusWireText.SanitizeVisible(value.lastStatus);
+            foreach (string key in keys)
+            {
+                UnitDefinition definition = ResolveProductionDefinition(restored, key);
+                if (definition == null) throw new InvalidDataException("Persisted factory queue contains an incompatible or unknown definition.");
+            }
+            restored.currentProductionIndex = keys.Count == 0 ? 0 : Math.Max(0, Math.Min(value.currentProductionIndex, keys.Count - 1));
+            NormalizeLoadedFactory(restored);return restored;
+        }
+
+        private static void DestroyVirtualAnchorForReload(RtsFactory factory)
+        {
+            if (factory == null || !factory.isVirtual || factory.anchorUnit == null) return;
+            try
+            {
+                if (HorusPermissions.IsMultiplayer()) NetworkServer.Destroy(factory.anchorUnit.gameObject);
+                else UnityEngine.Object.Destroy(factory.anchorUnit.gameObject);
+            }
+            catch (Exception ex) { HorusLog.Warning("Factory", "Failed to remove replaced factory visual: " + ex.Message); }
+            factory.anchorUnit = null;
         }
 
         private void NormalizeLoadedFactory(RtsFactory factory)
@@ -1927,7 +1943,8 @@ namespace HorusMod.Economy
                 anchorUnitName = f.anchorUnit == null ? f.anchorUnitName : f.anchorUnit.unitName,
                 anchorDestroyed = f.anchorDestroyed,
                 isVirtual = f.isVirtual,
-                visualBuilding = f.visualBuilding
+                visualBuilding = f.visualBuilding,
+                lastStatus = HorusWireText.SanitizeVisible(f.lastStatus)
             };
         }
 
@@ -1966,7 +1983,8 @@ namespace HorusMod.Economy
                 anchorUnitName = sf.anchorUnitName,
                 anchorDestroyed = sf.anchorDestroyed,
                 isVirtual = sf.isVirtual,
-                visualBuilding = sf.visualBuilding
+                visualBuilding = sf.visualBuilding,
+                lastStatus = sf.lastStatus
             };
 
             if (!string.IsNullOrEmpty(f.anchorUnitName))

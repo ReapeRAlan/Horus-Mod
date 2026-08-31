@@ -23,6 +23,11 @@ namespace HorusMod.Client
         private Guid snapshotId;
         private int snapshotPageCount;
         private float nextCommandSendTime;
+        private bool snapshotRequestPending;
+        private bool snapshotNeeded;
+        private ulong snapshotRevision;
+        private float snapshotRequestSentTime;
+        private float nextSnapshotRequestTime;
 
         public static HorusClientTransport Instance { get; private set; }
         public bool IsReady => IsRemoteClient && Authorized && SessionId != Guid.Empty && registeredClient != null && registeredClient.IsConnected;
@@ -64,6 +69,7 @@ namespace HorusMod.Client
                 helloSent=true;Send(HorusPacketKind.Hello,new HorusHello{ClientVersion=HorusPlugin.PluginVersion});Status="Handshake sent";
             }
             TrySendNext();
+            TrySendSnapshotRequest();
         }
 
         public bool TrySubmit(HorusCommandKind command,HorusCommandPayload payload,out Guid requestId)
@@ -71,11 +77,26 @@ namespace HorusMod.Client
             requestId=Guid.NewGuid();
             if(!IsReady){Status=Authorized?"Server state is not ready":"Horus permission was not granted";return false;}
             var envelope=new HorusCommandEnvelope{SessionId=SessionId,RequestId=requestId,Command=command,Payload=payload??new HorusCommandPayload()};
+            if(!Supports(command)){Status="Dedicated server does not advertise this Horus capability";return false;}
             if(!HorusCommandValidator.TryValidate(envelope,out string error)){Status=error;return false;}
             pending[requestId]=command;outbound.Enqueue(envelope);TrySendNext();return true;
         }
 
-        public void RequestSnapshot(){if(registeredClient==null||SessionId==Guid.Empty)return;Send(HorusPacketKind.StateRequest,new HorusStateRequest{SessionId=SessionId,KnownRevision=Revision});}
+        public void RequestSnapshot(){snapshotNeeded=true;TrySendSnapshotRequest();}
+
+        private void TrySendSnapshotRequest()
+        {
+            if(!snapshotNeeded||!Authorized||registeredClient==null||!registeredClient.IsConnected||SessionId==Guid.Empty)return;
+            float now=Time.unscaledTime;
+            if(snapshotRequestPending)
+            {
+                if(now-snapshotRequestSentTime<5f)return;
+                snapshotRequestPending=false;
+            }
+            if(now<nextSnapshotRequestTime)return;
+            snapshotRequestPending=true;snapshotNeeded=false;snapshotRequestSentTime=now;nextSnapshotRequestTime=now+0.55f;
+            Send(HorusPacketKind.StateRequest,new HorusStateRequest{SessionId=SessionId,KnownRevision=Revision});
+        }
 
         private void HandleMessage(HorusTransportMessage message)
         {
@@ -95,33 +116,66 @@ namespace HorusMod.Client
 
         private void HandleCapabilities(HorusCapabilities value)
         {
-            ServerVersion=value.ServerVersion;SessionId=value.SessionId;Revision=value.Revision;Capabilities=value.Features;Authorized=value.Authorized;Status=value.Message;
-            inFlightRequestId=Guid.Empty;pending.Clear();outbound.Clear();
-            HorusToasts.Show(value.Authorized?"Horus dedicated authority granted":"Horus dedicated: "+value.Message);
-            if(value.Authorized)RequestSnapshot();
+            bool protocolValid=HorusResponsePolicy.IsValidCapabilities(value);
+            ServerVersion=value.ServerVersion;SessionId=value.SessionId;Revision=value.Revision;Capabilities=protocolValid?value.Features:HorusCapability.None;Authorized=protocolValid&&value.Authorized&&value.SessionId!=Guid.Empty;Status=protocolValid?value.Message:"Dedicated Horus protocol mismatch";
+            inFlightRequestId=Guid.Empty;pending.Clear();outbound.Clear();snapshotNeeded=false;ResetSnapshotAssembly();
+            HorusToasts.Show(Authorized?"Horus dedicated authority granted":"Horus dedicated: "+Status);
+            if(Authorized)RequestSnapshot();
         }
         private void HandleResult(HorusCommandResult value)
         {
-            pending.Remove(value.RequestId);if(inFlightRequestId==value.RequestId)inFlightRequestId=Guid.Empty;SessionId=value.SessionId;Revision=value.Revision;Status=value.Message;
+            if(!HorusResponsePolicy.IsValidResult(value)){Status="Rejected invalid dedicated command result";RequestSnapshot();return;}
+            pending.Remove(value.RequestId);if(inFlightRequestId==value.RequestId)inFlightRequestId=Guid.Empty;
+            if(value.SessionId!=SessionId){SessionId=value.SessionId;Revision=value.Revision;ResetSnapshotAssembly();}else if(value.Revision>Revision)Revision=value.Revision;
+            Status=value.Message;
             HorusToasts.Show(value.Result==HorusResultCode.Accepted?value.Message:"Horus rejected: "+value.Message);
-            if(value.Result==HorusResultCode.Accepted)RequestSnapshot();
+            if(value.Result==HorusResultCode.Unauthorized||value.Result==HorusResultCode.SteamRequired||value.Result==HorusResultCode.Disabled||value.Result==HorusResultCode.ProtocolMismatch){Authorized=false;outbound.Clear();snapshotNeeded=false;ResetSnapshotAssembly();}
             if(value.Result==HorusResultCode.InvalidSession||value.Result==HorusResultCode.StaleRevision){outbound.Clear();RequestSnapshot();}
             TrySendNext();
         }
         private void HandleEvent(HorusStateEvent value)
         {
-            if(value.SessionId!=SessionId){SessionId=value.SessionId;Revision=0;RequestSnapshot();return;}
-            if(value.Revision!=Revision+1&&value.Revision!=Revision){RequestSnapshot();return;}
+            if(!HorusResponsePolicy.IsValidEvent(value)){Status="Rejected invalid dedicated state event";RequestSnapshot();return;}
+            if(value.SessionId!=SessionId){SessionId=value.SessionId;Revision=0;ResetSnapshotAssembly();RequestSnapshot();return;}
+            if(value.Revision<Revision)return;
+            if(value.Revision>Revision+1){Revision=value.Revision;RequestSnapshot();return;}
             Revision=value.Revision;
+            if(value.Result!=null&&value.Result.Result==HorusResultCode.Accepted)RequestSnapshot();
         }
         private void HandlePage(HorusStatePage page)
         {
-            if(page.SnapshotId!=snapshotId){snapshotId=page.SnapshotId;snapshotPageCount=page.PageCount;pages.Clear();}
-            if(page.PageIndex<0||page.PageIndex>=snapshotPageCount)return;pages[page.PageIndex]=page;
+            if(!HorusSnapshotPolicy.IsValidPageShape(page)||page.SessionId!=SessionId){ResetSnapshotAssembly();Status="Rejected invalid dedicated snapshot";RequestSnapshot();return;}
+            snapshotRequestSentTime=Time.unscaledTime;
+            if(page.SnapshotId!=snapshotId){snapshotId=page.SnapshotId;snapshotPageCount=page.PageCount;snapshotRevision=page.Revision;pages.Clear();}
+            if(page.PageCount!=snapshotPageCount||page.Revision!=snapshotRevision){ResetSnapshotAssembly();Status="Rejected inconsistent dedicated snapshot";RequestSnapshot();return;}
+            pages[page.PageIndex]=page;
             if(pages.Count!=snapshotPageCount)return;
-            var all=pages.OrderBy(pair=>pair.Key).Select(pair=>pair.Value).ToList();SessionId=page.SessionId;Revision=page.Revision;
-            ApplySnapshot(all);Status="Dedicated state synchronized";
+            var all=pages.OrderBy(pair=>pair.Key).Select(pair=>pair.Value).ToList();snapshotRequestPending=false;pages.Clear();
+            if(!HorusSnapshotPolicy.IsCoherentSnapshot(all)){ResetSnapshotAssembly();Status="Rejected incoherent dedicated snapshot";RequestSnapshot();return;}
+            if(snapshotRevision<Revision){ResetSnapshotAssembly();RequestSnapshot();return;}
+            Revision=snapshotRevision;
+            ApplySnapshot(all);Status="Dedicated state synchronized";TrySendSnapshotRequest();
         }
+
+        private static HorusCapability RequiredCapability(HorusCommandKind command)
+        {
+            switch(command)
+            {
+                case HorusCommandKind.Spawn:case HorusCommandKind.Duplicate:return HorusCapability.Spawn;
+                case HorusCommandKind.Delete:return HorusCapability.Delete;
+                case HorusCommandKind.Move:case HorusCommandKind.Hold:case HorusCommandKind.ClearOrders:return HorusCapability.Orders;
+                case HorusCommandKind.AttackTarget:case HorusCommandKind.AttackMove:case HorusCommandKind.Patrol:case HorusCommandKind.Guard:case HorusCommandKind.SetRulesOfEngagement:return HorusCapability.TacticalOrders;
+                case HorusCommandKind.SetLoadout:return HorusCapability.Loadouts;
+                case HorusCommandKind.SetLivery:case HorusCommandKind.SetSkill:case HorusCommandKind.SetFuel:return HorusCapability.UnitEditing;
+                case HorusCommandKind.SetBudget:case HorusCommandKind.AdjustBudget:case HorusCommandKind.SetRtsMode:case HorusCommandKind.SetRtsDeployMode:case HorusCommandKind.AdjustUnitCap:return HorusCapability.Economy;
+                case HorusCommandKind.CreateFactory:case HorusCommandKind.DeleteFactory:case HorusCommandKind.SetFactoryEnabled:case HorusCommandKind.SetFactoryProductionEnabled:case HorusCommandKind.SetFactoryConsumesBudget:case HorusCommandKind.QueueFactoryUnit:case HorusCommandKind.RemoveFactoryQueueItem:case HorusCommandKind.ClearFactoryQueue:case HorusCommandKind.SetFactoryRally:case HorusCommandKind.ClearFactoryRally:case HorusCommandKind.StartAllFactories:case HorusCommandKind.StopAllFactories:case HorusCommandKind.ReloadFactories:case HorusCommandKind.ResetFactoryPresets:case HorusCommandKind.SaveFactories:case HorusCommandKind.LoadFactories:return HorusCapability.Factories;
+                case HorusCommandKind.Undo:case HorusCommandKind.Redo:return HorusCapability.UndoRedo;
+                default:return HorusCapability.None;
+            }
+        }
+        private bool Supports(HorusCommandKind command){HorusCapability required=RequiredCapability(command);return required!=HorusCapability.None&&(Capabilities&required)==required;}
+
+        private void ResetSnapshotAssembly(){snapshotRequestPending=false;snapshotId=Guid.Empty;snapshotPageCount=0;snapshotRevision=0;pages.Clear();}
 
         private static void ApplySnapshot(List<HorusStatePage> statePages)
         {
@@ -154,7 +208,7 @@ namespace HorusMod.Client
         }
 
         private void Send(HorusPacketKind kind,object value){registeredClient?.Send(new HorusTransportMessage{Payload=HorusWireCodec.Encode(kind,value)});}
-        private void Unregister(){if(registeredClient!=null)try{((IMessageReceiver)registeredClient.MessageHandler).UnregisterHandler<HorusTransportMessage>();}catch{}registeredClient=null;helloSent=false;Authorized=false;inFlightRequestId=Guid.Empty;pending.Clear();outbound.Clear();pages.Clear();}
+        private void Unregister(){if(registeredClient!=null)try{((IMessageReceiver)registeredClient.MessageHandler).UnregisterHandler<HorusTransportMessage>();}catch{}registeredClient=null;helloSent=false;Authorized=false;inFlightRequestId=Guid.Empty;pending.Clear();outbound.Clear();snapshotNeeded=false;ResetSnapshotAssembly();}
         private static void EnsureSerialization(){Writer<HorusTransportMessage>.Write=(writer,value)=>writer.WriteBytesAndSize(value?.Payload??Array.Empty<byte>(),HorusProtocol.MaxMessageBytes);Reader<HorusTransportMessage>.Read=reader=>new HorusTransportMessage{Payload=reader.ReadBytesAndSize(HorusProtocol.MaxMessageBytes)};try{MessagePacker.RegisterMessage<HorusTransportMessage>();}catch(ArgumentException){}}
     }
 
