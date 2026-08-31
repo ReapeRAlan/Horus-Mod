@@ -40,7 +40,9 @@ After restart, confirm `wsl --list --verbose` reports version 2. Store the activ
 
 The Linux depot may be downloaded directly inside WSL or copied from a SteamCMD download that was explicitly forced to the Linux platform. Verify `NuclearOptionServer.x86_64`, `UnityPlayer.so`, and `NuclearOptionServer_Data/Managed` before installing BepInEx.
 
-Install the BepInEx 5 Mono build appropriate for the operating system into the dedicated-server root. Start the server once to create `BepInEx/config`, stop it, set `HideManagerGameObject = true` under `[Chainloader]` in `BepInEx/config/BepInEx.cfg`, and extract `Horus-Dedicated-v2.0.0-rc.1.zip` into that same root. Nuclear Option scene loading can otherwise remove the BepInEx manager and stop plugin `Update` processing.
+Install the BepInEx 5 Mono build appropriate for the operating system into the dedicated-server root. Linux x86-64 servers require the `linux_x64` package, not the x86 package. Start the server once to create `BepInEx/config`, stop it, set `HideManagerGameObject = true` under `[Chainloader]` in `BepInEx/config/BepInEx.cfg`, and extract `Horus-Dedicated-v2.0.0-rc.1.zip` into that same root. Nuclear Option scene loading can otherwise remove the BepInEx manager and stop plugin `Update` processing.
+
+The official Linux depot contains a 32-bit `steamclient.so` at its root and the required 64-bit library under `linux64/`. Launch through the official `RunServer.sh`, or export `LD_LIBRARY_PATH="$PWD/linux64${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"` before invoking `run_bepinex.sh`. The bundled runtime helper validates this architecture and loader path before starting the server.
 
 For Windows allow inbound UDP 7777 and 7778, or the ports selected in `DedicatedServerConfig.json`. Apply the equivalent firewall policy on Linux. The optional official administrative TCP service is separate from Horus and is never used for unit control.
 

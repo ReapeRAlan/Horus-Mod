@@ -4,20 +4,21 @@ Record only observed results. Use `PASS`, `FAIL`, `PENDING`, or `BLOCKED`; never
 
 ## Automated gate
 
-- [ ] `./build/validate-release.ps1` returns `HORUS RELEASE VALIDATION: PASS`.
-- [ ] Shared, Client, and Server builds have zero warnings and zero errors.
-- [ ] All pure tests pass.
-- [ ] Server assembly dependency audit passes.
-- [ ] UTF-8, English, JSON, PowerShell, Markdown-link, and version checks pass.
-- [ ] Two packaging runs produce identical hashes.
-- [ ] ZIP contents and embedded `SHA256SUMS` validate.
-- [ ] No proprietary or generated DLL/ZIP is tracked by Git.
+- [x] `./build/validate-release.ps1` returns `HORUS RELEASE VALIDATION: PASS`.
+- [x] Shared, Client, and Server builds have zero warnings and zero errors.
+- [x] All pure tests pass.
+- [x] Server assembly dependency audit passes.
+- [x] UTF-8, English, JSON, PowerShell, Bash, Markdown-link, and version checks pass.
+- [x] Two packaging runs produce identical hashes.
+- [x] ZIP contents and embedded `SHA256SUMS` validate.
+- [x] No proprietary or generated DLL/ZIP is tracked by Git.
 
 ## Windows official server
 
-- [ ] Clean headless start and restart.
-- [ ] Steam login and Mirage handler registration.
-- [ ] BuiltIn mission and two rotations.
+- [x] Clean headless start and restart.
+- [x] Steam login and Mirage handler registration.
+- [x] BuiltIn mission selection.
+- [ ] Two rotations.
 - [ ] Workshop mission download and load.
 - [ ] Client without Horus joins normally.
 - [ ] Same authenticated account is denied outside the allowlist and authorized inside it.
@@ -29,10 +30,11 @@ Record only observed results. Use `PASS`, `FAIL`, `PENDING`, or `BLOCKED`; never
 
 ## Linux official server
 
-- [ ] WSL 2 Ubuntu 24.04 reports a native Linux kernel and x86_64 architecture.
-- [ ] Clean headless start and restart through BepInEx.
-- [ ] Steam login and Mirage handler registration.
-- [ ] BuiltIn mission, Workshop mission, and two rotations.
+- [x] WSL 2 Ubuntu 24.04 reports a native Linux kernel and x86_64 architecture.
+- [x] Clean headless start and restart through BepInEx.
+- [x] Steam login and Mirage handler registration.
+- [x] BuiltIn mission selection.
+- [ ] Workshop mission and two rotations.
 - [ ] Authorization, reconnect, resync, full mutation matrix, and native replication.
 - [ ] Abuse limits and four-hour soak.
 - [ ] Logs, audit, metrics, configuration hash, package hash, and screenshots retained.
@@ -43,9 +45,10 @@ Record only observed results. Use `PASS`, `FAIL`, `PENDING`, or `BLOCKED`; never
 
 ## GitHub publication
 
-- [ ] Authenticate `gh` and fetch/prune branches and tags.
-- [ ] Confirm the exact remote state and inspect open pull requests.
-- [ ] Push `release/v2.0.0-rc.1`; never force-push `main` or an existing tag.
+- [x] Authenticate `gh` and fetch/prune branches and tags.
+- [x] Confirm the exact remote state and inspect open pull requests.
+- [x] Push `release/v2.0.0-rc.1`; never force-push `main` or an existing tag.
+- [x] Activate rulesets that require PR/CI for `main` and prevent update/deletion of `v*` tags.
 - [ ] Merge only after required CI succeeds.
 - [ ] Create an annotated tag on the exact merge commit.
 - [ ] Create a draft prerelease with `--verify-tag --prerelease --latest=false --fail-on-no-commits`.

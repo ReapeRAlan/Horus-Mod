@@ -11,10 +11,17 @@ config_path="$(realpath "$2")"
 duration_minutes="${3:-2}"
 evidence_root="${4:-$server_root/runtime-evidence/linux}"
 server_executable="$server_root/NuclearOptionServer.x86_64"
+steam_runtime="$server_root/linux64/steamclient.so"
 
 [[ -x "$server_executable" ]] || { echo "Linux server executable is missing or not executable: $server_executable" >&2; exit 1; }
+[[ -f "$steam_runtime" ]] || { echo "The official 64-bit Steam runtime is missing: $steam_runtime" >&2; exit 1; }
+file "$steam_runtime" | grep -Fq 'ELF 64-bit' || { echo "The Steam runtime is not a 64-bit ELF library: $steam_runtime" >&2; exit 1; }
 [[ -f "$config_path" ]] || { echo "Dedicated configuration not found: $config_path" >&2; exit 1; }
 grep -Eq '"ModdedServer"[[:space:]]*:[[:space:]]*true' "$config_path" || { echo "The runtime configuration must set ModdedServer=true." >&2; exit 1; }
+
+# Match the official RunServer.sh loader path. The depot root also contains a
+# 32-bit steamclient.so that must never be selected by the 64-bit server.
+export LD_LIBRARY_PATH="$server_root/linux64${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 
 stamp="$(date -u +%Y%m%d-%H%M%S)"
 evidence="$evidence_root/$stamp"

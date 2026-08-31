@@ -114,6 +114,11 @@ function Test-ScriptSyntax {
         [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $repoRoot $relative), [ref]$tokens, [ref]$errors) | Out-Null
         if ($errors.Count -gt 0) { throw "PowerShell syntax error in ${relative}: $($errors[0].Message)" }
     }
+    if ($env:OS -ne 'Windows_NT') {
+        foreach ($relative in Get-RepositoryFiles | Where-Object { [System.IO.Path]::GetExtension($_) -eq '.sh' }) {
+            Invoke-Checked 'bash' @('-n', (Join-Path $repoRoot $relative))
+        }
+    }
     $trackedBinaries = @(& git -c "safe.directory=$repoRoot" ls-files '*.dll' '*.zip')
     if ($trackedBinaries.Count -gt 0) { throw "Compiled or proprietary artifacts are tracked: $($trackedBinaries -join ', ')" }
 }
@@ -130,7 +135,7 @@ function Test-PackageArchive {
         foreach ($entry in $entries | Where-Object { $_.FullName.EndsWith('.dll', [StringComparison]::OrdinalIgnoreCase) }) {
             if ($entry.FullName -notin $allowedDlls) { throw "Unexpected dependency in package: $($entry.FullName)" }
         }
-        foreach ($required in @('README.md', 'CHANGELOG.md', 'ROADMAP.md', 'SECURITY.md', 'docs/dedicated-server.md', 'docs/upgrade-from-v1.4.3.md', 'docs/troubleshooting.md', 'docs/releases/v2.0.0-rc.1.md', 'docs/validation/release-checklist.md', 'docs/validation/release-matrix.json', 'SHA256SUMS')) {
+        foreach ($required in @('README.md', 'CHANGELOG.md', 'ROADMAP.md', 'SECURITY.md', 'docs/dedicated-server.md', 'docs/upgrade-from-v1.4.3.md', 'docs/troubleshooting.md', 'docs/releases/v2.0.0-rc.1.md', 'docs/validation/release-checklist.md', 'docs/validation/release-matrix.json', 'docs/validation/2026-08-30-windows-smoke.md', 'docs/validation/2026-08-31-linux-smoke.md', 'SHA256SUMS')) {
             if ($required -notin $entries.FullName) { throw "Missing package entry $required in $ZipPath." }
         }
         $manifestEntry = $entries | Where-Object { $_.FullName -eq 'SHA256SUMS' }

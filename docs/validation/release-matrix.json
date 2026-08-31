@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "version": "2.0.0-rc.1",
-  "updatedUtc": "2026-08-30T00:00:00Z",
+  "updatedUtc": "2026-08-31T00:47:00Z",
   "statuses": ["PASS", "FAIL", "PENDING", "BLOCKED"],
   "checks": [
     {
@@ -9,7 +9,7 @@
       "platform": "portable",
       "status": "PASS",
       "evidence": "80 pure logic, protocol, security, paging, state, and audit checks",
-      "notes": "Re-run through build/validate-release.ps1 before publication."
+      "notes": "Local full validation and GitHub Actions public-validation both pass. Re-run the full gate after the final tracked change."
     },
     {
       "id": "windows-headless-smoke",
@@ -22,15 +22,22 @@
       "id": "windows-full-runtime",
       "platform": "windows",
       "status": "PENDING",
-      "evidence": "",
-      "notes": "Workshop, rotations, remote mutation matrix, reconnect, resync, abuse, and soak remain to be executed."
+      "evidence": "HorusDedicatedTest/server-win/runtime-evidence/windows-soak-launch/20260830-183236",
+      "notes": "The four-hour soak is running. Workshop, rotations, remote mutation matrix, reconnect, resync, and abuse remain unexecuted."
     },
     {
-      "id": "linux-official-runtime",
+      "id": "linux-headless-smoke",
+      "platform": "linux-wsl2",
+      "status": "PASS",
+      "evidence": "docs/validation/2026-08-31-linux-smoke.md",
+      "notes": "Two sequential official Linux headless starts, Steam login, Horus/Mirage load, BuiltIn selection, readiness, hashes, and metrics passed."
+    },
+    {
+      "id": "linux-full-runtime",
       "platform": "linux-wsl2",
       "status": "PENDING",
-      "evidence": "",
-      "notes": "Official Linux depot is present; WSL 2 runtime is not installed yet."
+      "evidence": "/opt/horus/server-linux/runtime-evidence/linux",
+      "notes": "The four-hour soak is running. Workshop, rotations, remote mutation matrix, reconnect, resync, abuse, and normal-client replication remain unexecuted."
     },
     {
       "id": "two-steam-identities",
