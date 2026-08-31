@@ -401,9 +401,16 @@ internal static class Program
         string serverPluginSource = ReadRepoFile("src", "Server", "HorusServerPlugin.cs");
         Check("dedicated safety exposes a separate original-unit mutation policy",
             serverPluginSource.Contains("AllowMissionUnitMutation", StringComparison.Ordinal));
+        string serverCompatibilitySource = ReadRepoFile("src", "Server", "HorusServerCompatibility.cs");
         string ordnancePatchSource = ReadRepoFile("src", "Server", "HorusServerOrdnancePatches.cs");
+        string bombingPatchSource = ReadRepoFile("src", "Interaction", "HorusBombingCorrection.cs");
+        string tacticalPatchSource = ReadRepoFile("src", "Interaction", "HorusTacticalHarmonyPatches.cs");
         Check("dedicated gameplay patches preserve native behavior while Horus is disabled",
-            ordnancePatchSource.Contains("IsRuntimeEnabled)return true", StringComparison.Ordinal));
+            serverPluginSource.Contains("HorusMod.HorusPlugin.ServerEnabled=enabledEntry", StringComparison.Ordinal) &&
+            serverCompatibilitySource.Contains("IsRuntimeEnabled => ServerEnabled?.Value == true", StringComparison.Ordinal) &&
+            ordnancePatchSource.Contains("IsRuntimeEnabled)return true", StringComparison.Ordinal) &&
+            bombingPatchSource.Contains("if (!HorusPlugin.IsRuntimeEnabled) return true", StringComparison.Ordinal) &&
+            tacticalPatchSource.Contains("if (!HorusPlugin.IsRuntimeEnabled) return true", StringComparison.Ordinal));
         Check("snapshot requests coalesce and recover after a dropped rate-limited response",
             clientTransportSource.Contains("snapshotNeeded=true", StringComparison.Ordinal) &&
             clientTransportSource.Contains("now-snapshotRequestSentTime<5f", StringComparison.Ordinal) &&
