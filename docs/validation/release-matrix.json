@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "version": "2.0.0-rc.1",
-  "updatedUtc": "2026-08-31T00:47:00Z",
+  "updatedUtc": "2026-08-31T00:58:00Z",
   "statuses": ["PASS", "FAIL", "PENDING", "BLOCKED"],
   "checks": [
     {
@@ -16,28 +16,28 @@
       "platform": "windows",
       "status": "PASS",
       "evidence": "docs/validation/2026-08-30-windows-smoke.md",
-      "notes": "Startup, Steam login, Mirage registration, deny-all policy, persistence restart, and BuiltIn mission selection passed."
+      "notes": "Startup/restart, Steam login, Mirage registration, deny-all policy, persistence restart, BuiltIn selection, and Workshop download/selection passed."
     },
     {
       "id": "windows-full-runtime",
       "platform": "windows",
       "status": "PENDING",
       "evidence": "HorusDedicatedTest/server-win/runtime-evidence/windows-soak-launch/20260830-183236",
-      "notes": "The four-hour soak is running. Workshop, rotations, remote mutation matrix, reconnect, resync, and abuse remain unexecuted."
+      "notes": "The four-hour soak is running. Connected Workshop gameplay, rotations, remote mutation matrix, reconnect, resync, and abuse remain unexecuted."
     },
     {
       "id": "linux-headless-smoke",
       "platform": "linux-wsl2",
       "status": "PASS",
       "evidence": "docs/validation/2026-08-31-linux-smoke.md",
-      "notes": "Two sequential official Linux headless starts, Steam login, Horus/Mirage load, BuiltIn selection, readiness, hashes, and metrics passed."
+      "notes": "Two sequential official Linux starts plus public Workshop download/selection, Steam login, Horus/Mirage load, readiness, hashes, and metrics passed."
     },
     {
       "id": "linux-full-runtime",
       "platform": "linux-wsl2",
       "status": "PENDING",
       "evidence": "/opt/horus/server-linux/runtime-evidence/linux",
-      "notes": "The four-hour soak is running. Workshop, rotations, remote mutation matrix, reconnect, resync, abuse, and normal-client replication remain unexecuted."
+      "notes": "The four-hour soak is running. Connected Workshop gameplay, rotations, remote mutation matrix, reconnect, resync, abuse, and normal-client replication remain unexecuted."
     },
     {
       "id": "two-steam-identities",

@@ -31,6 +31,7 @@ This is implementation evidence, not the complete release acceptance report. It 
 - A final client restart loads the complete economy and all six factory presets with `migration_lines=0` and `exception_error_lines=0`.
 - The GM, Dedicated, and Full ZIP layouts and embedded `SHA256SUMS` manifests validate, and a second packaging run produces byte-identical ZIP hashes.
 - The controlled two-minute Windows runtime check completed at `2026-08-30T23:55:02Z` with `fatalFindingCount=0`. Both required readiness markers (`Horus Dedicated Server` and `Waiting for Players before loading next map`) were present.
+- A separate hidden-server instance downloaded public Workshop mission `3725687524` (`Escalation Gambler Edition`) to 100%, verified it as up to date, resolved its JSON, executed mission `AfterLoad`, selected it for the rotation, and reached the player-waiting state with `fatalFindingCount=0`.
 
 ## Runtime findings fixed during the smoke
 
@@ -44,6 +45,7 @@ This is implementation evidence, not the complete release acceptance report. It 
 - Dedicated BepInEx log: `HorusDedicatedTest/server-win/BepInEx/LogOutput.log`.
 - Dedicated Unity logs: `HorusDedicatedTest/server-win/logs/horus_smoke_3.log` through `horus_smoke_5.log` and `horus_client_test.log`.
 - Controlled runtime bundle: `HorusDedicatedTest/server-win/runtime-evidence/windows/20260830-235302` (sanitized configuration, binary hashes, sampled process metrics, server log, BepInEx log, and `analysis.json`).
+- Workshop runtime bundle: `HorusDedicatedTest/server-win-workshop/runtime-evidence/windows/20260831-005550`.
 - Final client BepInEx log: `BepInEx/LogOutput.log`.
 - Final client Unity log: `horus_client_factory_clean_2.log`.
 - RC packages: `NuclearOptionZeusMod/dist/Horus-*-v2.0.0-rc.1.zip`.
@@ -52,7 +54,7 @@ This is implementation evidence, not the complete release acceptance report. It 
 
 - Linux official-server execution was not possible because WSL/Linux is not installed on this workstation. The official Linux depot/API compile passed, but headless startup, mission rotation, networking, and soak still require a real Linux host.
 - A real allowlisted Steam GM connection, denied GM, ordinary client without Horus, two simultaneous GMs, reconnect, mission change, incompatible protocol, and snapshot resync remain unexecuted.
-- The server selected a BuiltIn mission but did not load its map without a connected player; two rotations and a Workshop mission remain pending.
+- The server selected BuiltIn and Workshop missions but did not load either map without a connected player; connected gameplay and two completed rotations remain pending.
 - The remote functional matrix (spawn, groups, Live Ordnance, orders, editing, safe delete, undo/redo, RTS, factories, and persistence observed by normal clients) remains pending.
 - Abuse testing and the four-hour soak remain pending.
 - Visual GM-client screenshots/video remain pending. The Windows automation helper could not run because the installed Node runtime was 22.17.1 while the helper required 22.22.0 or newer.

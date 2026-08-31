@@ -37,6 +37,7 @@
 - Expanded the pure logic suite from 26 to 80 checks, including every packet round-trip, strict UTF-8, truncation/magic/kind failures, exact boundary limits, individual SteamID64 parsing, deduplication capacity, rate limits, snapshot paging, mission state reset, audit JSON/retention, full factory/economy snapshots, and malformed message handling.
 - Added an assembly-reference gate that rejects UI, IMGUI, camera/input module, or Rewired references from `Horus.Server.dll`.
 - Validated two sequential official Linux headless starts on WSL 2 Ubuntu 24.04.4. The Linux helper now requires the depot's 64-bit Steam runtime and exports the official `linux64` loader path, preventing accidental selection of the root 32-bit `steamclient.so`.
+- Validated native download, update verification, JSON resolution, `AfterLoad`, and server-side selection of public Workshop mission `3725687524` on isolated Windows and Linux dedicated servers.
 - Validated the portable gate on a clean GitHub-hosted Ubuntu runner; the gate now restores test assets explicitly instead of relying on a local `obj` directory.
 - Production release remains blocked until the documented official Windows and Linux headless runtime matrix, two-client behavior, and four-hour soak pass.
 - The prerelease may transparently retain `PENDING – second legitimate Steam identity unavailable`; two simultaneous GMs and two concurrent identities cannot be simulated with Windows user profiles. These pending cases continue to block the stable `v2.0.0` release.

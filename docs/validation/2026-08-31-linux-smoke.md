@@ -23,6 +23,7 @@ This report records observed Linux headless results. It does not convert the une
 - BepInEx reports `Bits64, Linux`, loads exactly one plugin, and starts `Horus Dedicated Server 2.0.0`.
 - Horus reports informational version `2.0.0-rc.1`, loads zero administrators, applies its server patches, loads RTS configuration, and registers the Mirage handler.
 - The official server loads the 64-bit Steam runtime, logs on anonymously, selects BuiltIn mission `Escalation`, and reaches `Waiting for Players before loading next map`.
+- A separate instance downloaded public Workshop mission `3725687524` (`Escalation Gambler Edition`) to 100%, verified it as current, resolved the downloaded JSON, executed mission `AfterLoad`, selected it, and reached the player-waiting state.
 - Two sequential headless runs completed successfully. The second run contains no literal `[Error]` marker, unhandled exception, Horus load failure, or missing readiness marker.
 - The server was terminated by the controlled helper after each observation interval; hashes and CPU/RSS samples were retained.
 
@@ -38,11 +39,12 @@ Unity emits unsupported-shader messages while using its null graphics device und
 
 - First successful run: `/opt/horus/server-linux/runtime-evidence/linux/20260831-004047`.
 - Clean restart: `/opt/horus/server-linux/runtime-evidence/linux/20260831-004409`.
+- Workshop download/selection: `/opt/horus/server-linux-workshop/runtime-evidence/linux/20260831-005211`.
 - Four-hour soak started separately and remains `PENDING` until its helper exits successfully.
 
 ## Still pending
 
-- BuiltIn mission rotation beyond selection, Workshop download/load, and gameplay with a connected client.
+- BuiltIn/Workshop gameplay with a connected client and completed mission rotations beyond server-side mission selection.
 - Allowlisted and denied real Steam GM sessions, ordinary client without Horus, protocol mismatch, reconnect, mission change, and resynchronization.
 - The complete mutation/replication/abuse matrix and visual GM evidence.
 - Completion and analysis of the four-hour Linux soak.

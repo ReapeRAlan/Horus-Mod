@@ -19,7 +19,8 @@ Record only observed results. Use `PASS`, `FAIL`, `PENDING`, or `BLOCKED`; never
 - [x] Steam login and Mirage handler registration.
 - [x] BuiltIn mission selection.
 - [ ] Two rotations.
-- [ ] Workshop mission download and load.
+- [x] Public Workshop mission download, JSON resolution, `AfterLoad`, selection, and readiness.
+- [ ] Workshop gameplay with a connected client.
 - [ ] Client without Horus joins normally.
 - [ ] Same authenticated account is denied outside the allowlist and authorized inside it.
 - [ ] Protocol mismatch fails closed.
@@ -34,7 +35,8 @@ Record only observed results. Use `PASS`, `FAIL`, `PENDING`, or `BLOCKED`; never
 - [x] Clean headless start and restart through BepInEx.
 - [x] Steam login and Mirage handler registration.
 - [x] BuiltIn mission selection.
-- [ ] Workshop mission and two rotations.
+- [x] Public Workshop mission download, JSON resolution, `AfterLoad`, selection, and readiness.
+- [ ] Workshop gameplay with a connected client and two rotations.
 - [ ] Authorization, reconnect, resync, full mutation matrix, and native replication.
 - [ ] Abuse limits and four-hour soak.
 - [ ] Logs, audit, metrics, configuration hash, package hash, and screenshots retained.
