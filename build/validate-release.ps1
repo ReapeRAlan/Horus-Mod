@@ -185,6 +185,22 @@ try {
         Invoke-Checked 'dotnet' @('build', (Join-Path $repoRoot 'HorusMod.csproj'), '-c', $Configuration, '--nologo', '-warnaserror', "-p:NuclearOptionDir=$NuclearOptionDir", "-p:NuclearOptionManagedDir=$NuclearOptionManagedDir")
         & (Join-Path $repoRoot 'build/verify-server-assembly.ps1') -ServerAssembly (Join-Path $repoRoot "bin/$Configuration/net472/Horus.Server.dll")
 
+        Write-Step 'Proving assemblies are independent of the source commit identifier'
+        $revisionHashes = @()
+        foreach ($revision in @('1111111111111111111111111111111111111111', '2222222222222222222222222222222222222222')) {
+            Invoke-Checked 'dotnet' @('build', (Join-Path $repoRoot 'Horus.Server.csproj'), '-c', $Configuration, '--nologo', '--no-restore', '-t:Rebuild', '-warnaserror', "-p:SourceRevisionId=$revision", "-p:NuclearOptionDir=$ServerNuclearOptionDir", "-p:NuclearOptionManagedDir=$ServerManagedDir")
+            Invoke-Checked 'dotnet' @('build', (Join-Path $repoRoot 'HorusMod.csproj'), '-c', $Configuration, '--nologo', '--no-restore', '-t:Rebuild', '-warnaserror', "-p:SourceRevisionId=$revision", "-p:NuclearOptionDir=$NuclearOptionDir", "-p:NuclearOptionManagedDir=$NuclearOptionManagedDir")
+            $revisionHashes += [pscustomobject]@{
+                Revision = $revision
+                Shared = (Get-FileHash -LiteralPath (Join-Path $repoRoot "bin/$Configuration/netstandard2.0/Horus.Shared.dll") -Algorithm SHA256).Hash
+                Server = (Get-FileHash -LiteralPath (Join-Path $repoRoot "bin/$Configuration/net472/Horus.Server.dll") -Algorithm SHA256).Hash
+                Client = (Get-FileHash -LiteralPath (Join-Path $repoRoot "bin/$Configuration/net472/Horus.Client.dll") -Algorithm SHA256).Hash
+            }
+        }
+        foreach ($assembly in @('Shared', 'Server', 'Client')) {
+            if ($revisionHashes[0].$assembly -ne $revisionHashes[1].$assembly) { throw "$assembly assembly embeds or otherwise depends on SourceRevisionId." }
+        }
+
         Write-Step 'Building and comparing deterministic release packages'
         $secondOutput = Join-Path $repoRoot 'obj/release-validation/second-build'
         if (Test-Path -LiteralPath $secondOutput) { Remove-Item -LiteralPath $secondOutput -Recurse -Force }
