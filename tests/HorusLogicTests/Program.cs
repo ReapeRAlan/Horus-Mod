@@ -379,6 +379,16 @@ internal static class Program
 
         string serverTransportSource = ReadRepoFile("src", "Server", "HorusServerTransport.cs");
         string clientTransportSource = ReadRepoFile("src", "Client", "HorusClientTransport.cs");
+        string serverExecutorSource = ReadRepoFile("src", "Server", "HorusServerCommandExecutor.cs");
+        bool everyCommandMapped = true;
+        foreach (HorusCommandKind commandKind in Enum.GetValues(typeof(HorusCommandKind)))
+        {
+            if (commandKind == HorusCommandKind.None) continue;
+            string caseToken = "case HorusCommandKind." + commandKind;
+            everyCommandMapped &= serverExecutorSource.Contains(caseToken, StringComparison.Ordinal) &&
+                                  clientTransportSource.Contains(caseToken, StringComparison.Ordinal);
+        }
+        Check("every advertised command has server execution and client capability routing", everyCommandMapped);
         Check("server rate limiting and deduplication are keyed by authenticated Steam principal",
             serverTransportSource.Contains("GetPrincipal(client.SteamId", StringComparison.Ordinal) &&
             serverTransportSource.Contains("principal.Deduplicator", StringComparison.Ordinal));

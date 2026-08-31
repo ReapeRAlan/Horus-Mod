@@ -8,8 +8,8 @@
       "id": "automated-portable",
       "platform": "portable",
       "status": "PASS",
-      "evidence": "136 pure logic, protocol, security, UTF-8/visible-text, paging, ownership, persistence, strict size-bounded allowlist input, bounded economy/factory/server-config, dormant-authority activation, isolated-config, live-authority revocation, persistent protocol-negotiation enforcement, stale-session recovery, complete snapshot/response coherence and retry, runtime-runner safeguards, revision-independent assemblies, optional Nuclei v1.3.3 API compatibility, state, and audit checks",
-      "notes": "The complete local clean-tree gate passes with 136 checks and zero-warning Client/Server builds. Shared, Server, and Client remain byte-identical across a real Git commit change and two forced SourceRevisionId values. GitHub Actions public-validation and GitGuardian checks pass on PR #3."
+      "evidence": "137 pure logic, protocol, command-parity, security, UTF-8/visible-text, paging, ownership, persistence, strict size-bounded allowlist input, bounded economy/factory/server-config, dormant-authority activation, isolated-config, live-authority revocation, persistent protocol-negotiation enforcement, stale-session recovery, complete snapshot/response coherence and retry, runtime-runner safeguards, revision-independent assemblies, optional Nuclei v1.3.3 API compatibility, state, and audit checks",
+      "notes": "The complete local clean-tree gate passes with 137 checks and zero-warning Client/Server builds. Shared, Server, and Client remain byte-identical across a real Git commit change and two forced SourceRevisionId values. GitHub Actions public-validation and GitGuardian checks pass on PR #3."
     },
     {
       "id": "windows-headless-smoke",
