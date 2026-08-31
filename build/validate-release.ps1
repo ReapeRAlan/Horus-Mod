@@ -183,7 +183,6 @@ try {
         Write-Step 'Building game-dependent client and server assemblies'
         Invoke-Checked 'dotnet' @('build', (Join-Path $repoRoot 'Horus.Server.csproj'), '-c', $Configuration, '--nologo', '-warnaserror', "-p:NuclearOptionDir=$ServerNuclearOptionDir", "-p:NuclearOptionManagedDir=$ServerManagedDir")
         Invoke-Checked 'dotnet' @('build', (Join-Path $repoRoot 'HorusMod.csproj'), '-c', $Configuration, '--nologo', '-warnaserror', "-p:NuclearOptionDir=$NuclearOptionDir", "-p:NuclearOptionManagedDir=$NuclearOptionManagedDir")
-        & (Join-Path $repoRoot 'build/verify-server-assembly.ps1') -ServerAssembly (Join-Path $repoRoot "bin/$Configuration/net472/Horus.Server.dll")
 
         Write-Step 'Proving assemblies are independent of the source commit identifier'
         $revisionHashes = @([pscustomobject]@{
@@ -205,6 +204,7 @@ try {
         foreach ($assembly in @('Shared', 'Server', 'Client')) {
             if (@($revisionHashes | ForEach-Object { $_.$assembly } | Sort-Object -Unique).Count -ne 1) { throw "$assembly assembly embeds or otherwise depends on SourceRevisionId." }
         }
+        & (Join-Path $repoRoot 'build/verify-server-assembly.ps1') -ServerAssembly (Join-Path $repoRoot "bin/$Configuration/net472/Horus.Server.dll")
 
         Write-Step 'Building and comparing deterministic release packages'
         $secondOutput = Join-Path $repoRoot 'obj/release-validation/second-build'
