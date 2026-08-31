@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "version": "2.0.0-rc.1",
-  "updatedUtc": "2026-08-31T02:07:58Z",
+  "updatedUtc": "2026-08-31T02:10:44Z",
   "statuses": ["PASS", "FAIL", "PENDING", "BLOCKED"],
   "checks": [
     {
@@ -9,7 +9,7 @@
       "platform": "portable",
       "status": "PASS",
       "evidence": "130 pure logic, protocol, security, UTF-8/visible-text, paging, ownership, persistence, strict size-bounded allowlist input, bounded economy/factory/server-config, dormant-authority activation, isolated-config, live-authority revocation, stale-session recovery, complete snapshot/response coherence and retry, factory-visual parity, state, and audit checks",
-      "notes": "The complete local clean-tree gate passes with 130 checks and zero-warning Client/Server builds. GitHub Actions must rerun after push."
+      "notes": "The complete local clean-tree gate passes with 130 checks and zero-warning Client/Server builds. GitHub Actions public-validation and GitGuardian checks pass on PR #3."
     },
     {
       "id": "windows-headless-smoke",
