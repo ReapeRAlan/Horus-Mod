@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "version": "2.0.0-rc.1",
-  "updatedUtc": "2026-08-31T02:52:00Z",
+  "updatedUtc": "2026-08-31T03:15:11Z",
   "statuses": ["PASS", "FAIL", "PENDING", "BLOCKED"],
   "checks": [
     {
@@ -36,8 +36,8 @@
       "id": "linux-full-runtime",
       "platform": "linux-wsl2",
       "status": "PENDING",
-      "evidence": "/opt/horus/server-linux-workshop/runtime-evidence/linux-stable-rc-soak/20260831-025012",
-      "notes": "The four-hour exact-DLL soak is running. Connected Workshop gameplay, rotations, remote mutation matrix, reconnect, resync, abuse, and normal-client replication remain unexecuted."
+      "evidence": "/opt/horus/server-linux-workshop/runtime-evidence/linux-fixed-rc-soak/20260831-031317",
+      "notes": "The hardened exact-DLL smoke passed and a fresh four-hour soak is running. The earlier exact-DLL soak was intentionally stopped after protocol-negotiation hardening changed Horus.Server.dll and is not counted as PASS. Connected Workshop gameplay, rotations, remote mutation matrix, reconnect, resync, abuse, and normal-client replication remain unexecuted."
     },
     {
       "id": "two-steam-identities",
