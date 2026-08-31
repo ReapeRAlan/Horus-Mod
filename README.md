@@ -193,8 +193,8 @@ Factories, bases, or carriers automatically generate income and produce units ov
 - **Queue Loop**: Add units or compatible buildings to a factory's queue; it loops through the production list automatically. If budget or unit cap is insufficient, production pauses and reports the reason.
 - **Rally Points**: Set a rally point using targeted aim. Produced ground, naval, and AI air units receive a real movement order after spawning.
 - **Playable Factions**: Factories require a real faction with an active HQ. Neutral remains available for Sandbox unit placement but is rejected for factories with an explicit status instead of an index error.
-- **Config Migration**: Incomplete older economy/factory JSON files are filled with current defaults (including working production queues) and saved automatically.
-- **Persistent Instances**: Factory presets are saved in `BepInEx/config/HorusMod/rts_factories.json`; placed factory instances are saved in `BepInEx/config/HorusMod/rts_factory_instances.json`.
+- **Config Migration**: Compatible incomplete economy/factory JSON files are filled with current defaults and saved automatically. Invalid, oversized, non-finite, or unsupported files are rejected and replaced with bounded defaults.
+- **Persistent Instances**: Local/listen-host factory presets and instances use `rts_factories.json` and `rts_factory_instances.json`. Dedicated presets and instances use the isolated `rts_factories_server_config.json` and `rts_factories_server.json` files in `BepInEx/config/HorusMod/`.
 - **Economy Config**: Budgets, passive income, caps, and costs are saved in `BepInEx/config/HorusMod/rts_economy.json`. Global passive income is optional and lower than factory income in default configs.
 - **How to Create Factories**:
   1. Under the **RTS Factories & Production** panel, select a preset (e.g. Ground Vehicle Factory).
@@ -218,7 +218,7 @@ If you do have Horus installed, the UI shows your current mode:
 
 - **Dedicated Server GM** - full remote access only after authenticated SteamID64 allowlist approval.
 
-The v2.0.0-rc.1 dedicated transport uses versioned Mirage messages, manually registered bounded serializers, request deduplication, rate limits, authoritative catalog/position/loadout/cost validation, revisioned snapshots, safe-delete ownership, and JSONL audit logs. The allowlist is empty and `Horus.Server.cfg` is disabled by default. Nuclear Option's loopback server-command TCP endpoint is not used as a gameplay-control channel. See [the dedicated-server guide](docs/dedicated-server.md) for installation, security, and the mandatory release-candidate test matrix.
+The v2.0.0-rc.1 dedicated transport uses versioned Mirage messages, manually registered bounded serializers, per-SteamID request deduplication and rate limits, authoritative catalog/position/loadout/cost validation, validated revisioned snapshots, original-unit mutation policies, and JSONL audit logs. The allowlist is empty, any invalid allowlist entry rejects the complete file, and `Horus.Server.cfg` is disabled by default. Nuclear Option's loopback server-command TCP endpoint is not used as a gameplay-control channel. See [the dedicated-server guide](docs/dedicated-server.md) for installation, security, and the mandatory release-candidate test matrix.
 
 ### Map Spawn Mode
 1. Enable **Map Spawn: ON** in the Horus window (this also opens the map).

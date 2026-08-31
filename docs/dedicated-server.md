@@ -52,17 +52,24 @@ For Windows allow inbound UDP 7777 and 7778, or the ports selected in `Dedicated
 2. Add one exact SteamID64 per line to `BepInEx/config/HorusMod/dedicated_admins.txt`. Comments begin with `#`. An empty or invalid file denies all Horus mutations.
 3. Set `Enabled = true` in `BepInEx/config/Horus.Server.cfg` only after the allowlist has been reviewed.
 4. Keep `AllowMissionUnitDelete = false` unless authorized GMs must delete mission-authored units. The default permits deleting only units created through Horus.
-5. Install the GM package on the operator's normal game client. The GM joins through Steam as a normal authenticated player and occupies a player slot. Spectator authentication is not used.
+5. Keep `AllowMissionUnitMutation = false` unless authorized GMs must issue orders to or edit mission-authored units. This policy is independent from deletion and does not prevent Horus-owned units from targeting native mission units.
+6. Restart the server after changing either original-unit safety policy. Allowlist and `Enabled` changes are revalidated live.
+7. Install the GM package on the operator's normal game client. The GM joins through Steam as a normal authenticated player and occupies a player slot. Spectator authentication is not used.
 
-Authorization is fail-closed. Horus compares the exact SteamID64 supplied by the game's authenticated `INetworkPlayer.AuthData`; a display name, faction, password, claimed owner, or UDP-only connection never grants Horus permissions.
+Authorization is fail-closed. Horus compares the exact SteamID64 supplied by the game's authenticated `INetworkPlayer.AuthData` and requires the native Steam session to remain valid; a display name, faction, password, claimed owner, or UDP-only connection never grants Horus permissions.
+
+The current official binary evidence for this boundary is recorded in the [dedicated authentication audit](validation/2026-08-31-authentication-audit.md). It confirms the code path but does not convert the still-pending connected-account scenarios into runtime PASS results.
 
 ## Protocol and safety behavior
 
 - The Mirage protocol is versioned and uses manually registered serializers. No Unity object crosses the wire: commands contain stable definition keys, persistent/network IDs, numeric positions, enums, and bounded lists.
 - The authoritative server re-resolves catalogs, costs, hardpoints, factions, targets, ownership, placement, and current revision. Client calculations are advisory only.
-- Messages are capped at 16 KiB, lists at 64 entities, routes at 32 waypoints, and loadouts at 64 mounts. NaN, infinity, unknown keys, incompatible versions, stale revisions, duplicates, and rate-limit violations are rejected.
+- Messages are capped at 16 KiB, aggregate string lists at 8 KiB, lists at 64 entities, routes at 32 waypoints, and loadouts at 64 mounts. NaN, infinity, unknown keys, incompatible versions, stale revisions, duplicates, and rate-limit violations are rejected.
 - Each mission has a new session ID and monotonic revision. Clients receive paged snapshots and resynchronize after reconnects, mission changes, or revision gaps.
-- Accepted and rejected mutations are written as daily JSONL under `BepInEx/config/HorusMod/audit`; the default retention is 14 days.
+- Rate limits and request deduplication are keyed to the authenticated SteamID64 and remain effective across reconnections during the server process lifetime.
+- Accepted and rejected structured command requests are written as daily JSONL under `BepInEx/config/HorusMod/audit`; the default retention is 14 days and pruning is reevaluated daily. Malformed pre-command traffic is rate-limited and goes only to the operational log to avoid an unauthenticated audit-disk amplification path.
+- Snapshot pages and restored factory state are validated before use. An invalid persisted factory file is rejected atomically, leaving the current in-memory state unchanged.
+- Dedicated factory presets are stored in `BepInEx/config/HorusMod/rts_factories_server_config.json`; dedicated runtime instances are stored in `rts_factories_server.json`. These files are intentionally separate from the local/listen-host client schema.
 - Nuclei is an optional soft integration. When present, Horus registers read-only status/diagnostic commands; no Nuclei or TCP command mutates Horus state.
 
 ## Build and package from source

@@ -15,15 +15,21 @@
 
 ### Security
 
-- Added per-SteamID token-bucket rate limits, request-ID deduplication, session/revision checks, 16 KiB message limits, 64-entity and 32-waypoint limits, and rejection of unknown keys, NaN, infinity, invalid factions, invalid costs, incompatible protocol versions, and stale commands.
-- Tightened allowlist parsing to accept only individual SteamID64 values, reject control characters in stable keys, reject malformed UTF-8 instead of replacing it silently, and emit strictly escaped single-line JSON audit records with bounded parameter metadata.
+- Added per-SteamID token-bucket rate limits and request-ID deduplication that survive reconnects, session/revision checks, 16 KiB message limits, an 8 KiB aggregate string-list limit, 64-entity and 32-waypoint limits, and rejection of unknown keys, NaN, infinity, invalid factions, invalid costs, incompatible protocol versions, and stale commands.
+- Tightened allowlist parsing to accept only individual SteamID64 values and reject the complete file when any entry is invalid. Stable keys reject controls and malformed or oversized UTF-8 instead of replacing it silently.
+- Added strictly escaped single-line JSON audit records for accepted and rejected structured commands, with bounded parameter metadata and daily retention enforcement.
 - Server-side code re-resolves Unity catalogs and native state; no `Unit`, `Loadout`, `FactionHQ`, or other Unity object is accepted over the network.
-- Deletion is limited to Horus-owned units by default. UDP-only connections, display names, factions, passwords, and claimed owner IDs never grant GM authority.
+- Deletion and other original-mission-unit mutations use separate, disabled-by-default policies. UDP-only connections, display names, factions, passwords, and claimed owner IDs never grant GM authority.
+- `Enabled = false` now gates dedicated gameplay patches as well as command execution. Authorization is revalidated before queued execution and immediately after live allowlist or enabled-state changes.
+- Snapshot pages are independently validated and constructed so their worst-case layout remains bounded. Persisted factory state is restored atomically only after IDs, factions, positions, numeric ranges, presets, queue keys, queue type compatibility, counts, and aggregate bytes pass validation.
 
 ### Changed
 
-- Client visual state, selection, camera, previews, hotkeys, favorites, and preset editing remain local; every world mutation uses the same local or remote authoritative gateway.
+- Client visual state, selection, camera, previews, hotkeys, favorites, and preset editing remain local. Dedicated mutations use the remote command gateway; established single-player and listen-host paths remain in process and server-authoritative through native game APIs.
 - The dedicated factory runtime now shares the six client presets, validates type-correct queues, persists full runtime state, and delegates produced-unit replication to native game APIs.
+- Headless factories now spawn, track, retry, persist, and network-destroy their validated native visual building anchors, restoring the visible factory behavior observed by ordinary clients.
+- Dedicated and local factory preset files are now isolated so the Full package cannot overwrite one JSON schema with the other. `Horus.Server` also remains dormant on ordinary remote clients and activates only under headless, batch, or native server authority.
+- Economy and factory inputs now reject non-finite, negative, overflowing, oversized, duplicated, ambiguous, and out-of-range values. Local and dedicated factory production both use the authoritative transaction pipeline, and invalid local persistence is rejected before replacing live state.
 - Targeted naval resupply now carries a stable ship identity so the dedicated server can validate the ship and issue its native rearm request after spawning a compatible supply object.
 - Project targets are aligned to deterministic .NET Framework reference assemblies, resolving the former `System.IO.Compression` assembly-version conflict instead of suppressing it.
 
@@ -34,7 +40,7 @@
 - The Windows smoke tests also exposed Unity `JsonUtility` dropping nested factory/economy fields. Client and dedicated economy persistence plus dedicated factory persistence now use the game-provided Newtonsoft.Json assembly; dedicated reload is runtime-validated after restart.
 - Client factory preset parsing now preserves production queues through Newtonsoft as well, eliminating the repeated startup migration caused by dropped list fields.
 - Factory normalization no longer marks the non-producing Economy preset as changed merely because its intentional production interval is zero.
-- Expanded the pure logic suite from 26 to 80 checks, including every packet round-trip, strict UTF-8, truncation/magic/kind failures, exact boundary limits, individual SteamID64 parsing, deduplication capacity, rate limits, snapshot paging, mission state reset, audit JSON/retention, full factory/economy snapshots, and malformed message handling.
+- Expanded the pure logic suite from 26 to 130 checks, including every packet round-trip, strict UTF-8 and visible-text sanitization, truncation/magic/kind failures, exact and aggregate byte limits, fail-closed size-bounded allowlists, live native Steam-session enforcement and cached-authority revocation, unique stable unit identities, per-SteamID deduplication/rate-limit wiring, stale-session recovery, complete response/snapshot coherence and retry, ownership policy, persistence policy, bounded authoritative economy/factory arithmetic and server configuration, dormant server activation, isolated configuration, headless factory visual replication, mission state reset, audit JSON/retention, full factory/economy snapshots, and malformed message handling.
 - Added an assembly-reference gate that rejects UI, IMGUI, camera/input module, or Rewired references from `Horus.Server.dll`.
 - Validated two sequential official Linux headless starts on WSL 2 Ubuntu 24.04.4. The Linux helper now requires the depot's 64-bit Steam runtime and exports the official `linux64` loader path, preventing accidental selection of the root 32-bit `steamclient.so`.
 - Validated native download, update verification, JSON resolution, `AfterLoad`, and server-side selection of public Workshop mission `3725687524` on isolated Windows and Linux dedicated servers.

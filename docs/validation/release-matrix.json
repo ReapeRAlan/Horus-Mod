@@ -1,15 +1,15 @@
 {
   "schemaVersion": 1,
   "version": "2.0.0-rc.1",
-  "updatedUtc": "2026-08-31T00:58:00Z",
+  "updatedUtc": "2026-08-31T02:06:41Z",
   "statuses": ["PASS", "FAIL", "PENDING", "BLOCKED"],
   "checks": [
     {
       "id": "automated-portable",
       "platform": "portable",
       "status": "PASS",
-      "evidence": "80 pure logic, protocol, security, paging, state, and audit checks",
-      "notes": "Local full validation and GitHub Actions public-validation both pass. Re-run the full gate after the final tracked change."
+      "evidence": "130 pure logic, protocol, security, UTF-8/visible-text, paging, ownership, persistence, strict size-bounded allowlist input, bounded economy/factory/server-config, dormant-authority activation, isolated-config, live-authority revocation, stale-session recovery, complete snapshot/response coherence and retry, factory-visual parity, state, and audit checks",
+      "notes": "The current local logic suite and zero-warning Client/Server builds pass. Final clean-tree gate and GitHub Actions rerun are still required."
     },
     {
       "id": "windows-headless-smoke",
@@ -49,9 +49,9 @@
     {
       "id": "release-assets",
       "platform": "packaging",
-      "status": "PASS",
+      "status": "PENDING",
       "evidence": "dist/SHA256SUMS.txt and dist/release-manifest.json",
-      "notes": "The release gate rebuilds the three archives twice and requires byte-identical output and valid embedded manifests."
+      "notes": "Package inputs were corrected after the provisional gate detected a missing evidence document. Regenerate from the final clean commit and verify byte-identical output."
     }
   ]
 }

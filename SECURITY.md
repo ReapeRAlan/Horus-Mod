@@ -10,9 +10,12 @@ Security fixes are applied to the newest supported line. A critical issue in an 
 
 - Horus dedicated control is disabled by default.
 - An empty administrator allowlist denies every mutation.
-- Only an authenticated individual SteamID64 supplied by the game's authenticated connection can receive GM authority.
+- Only an authenticated individual SteamID64 supplied by the game's authenticated connection with a currently valid native Steam session can receive GM authority.
 - Display names, factions, passwords, claimed ownership, host flags, and UDP-only identity never grant Horus access.
 - Deletion is limited to Horus-created entities unless the server operator deliberately changes the policy.
+- Orders and unit editing are limited to Horus-created entities unless `AllowMissionUnitMutation` is deliberately enabled. Deletion remains controlled by its separate setting.
+- Any invalid allowlist entry rejects the complete file. Rate limits and request deduplication are keyed by the authenticated SteamID64, not by a reconnectable network session.
+- `Enabled = false` gates dedicated gameplay patches as well as command execution, preserving native server behavior.
 - The official TCP administration endpoint is not a Horus gameplay-control transport.
 
 Never commit a real administrator allowlist, Steam credential, server password, private mission, audit log, or proprietary Nuclear Option assembly.
