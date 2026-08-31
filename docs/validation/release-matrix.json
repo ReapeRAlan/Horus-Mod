@@ -1,15 +1,15 @@
 {
   "schemaVersion": 1,
   "version": "2.0.0-rc.1",
-  "updatedUtc": "2026-08-31T02:10:44Z",
+  "updatedUtc": "2026-08-31T02:52:00Z",
   "statuses": ["PASS", "FAIL", "PENDING", "BLOCKED"],
   "checks": [
     {
       "id": "automated-portable",
       "platform": "portable",
       "status": "PASS",
-      "evidence": "130 pure logic, protocol, security, UTF-8/visible-text, paging, ownership, persistence, strict size-bounded allowlist input, bounded economy/factory/server-config, dormant-authority activation, isolated-config, live-authority revocation, stale-session recovery, complete snapshot/response coherence and retry, factory-visual parity, state, and audit checks",
-      "notes": "The complete local clean-tree gate passes with 130 checks and zero-warning Client/Server builds. GitHub Actions public-validation and GitGuardian checks pass on PR #3."
+      "evidence": "134 pure logic, protocol, security, UTF-8/visible-text, paging, ownership, persistence, strict size-bounded allowlist input, bounded economy/factory/server-config, dormant-authority activation, isolated-config, live-authority revocation, stale-session recovery, complete snapshot/response coherence and retry, runtime-runner safeguards, revision-independent assemblies, state, and audit checks",
+      "notes": "The complete local clean-tree gate passes with 134 checks and zero-warning Client/Server builds. Shared, Server, and Client remain byte-identical across a real Git commit change and two forced SourceRevisionId values. GitHub Actions public-validation and GitGuardian checks pass on PR #3."
     },
     {
       "id": "windows-headless-smoke",
@@ -23,21 +23,21 @@
       "platform": "windows",
       "status": "PENDING",
       "evidence": "HorusDedicatedTest/server-win/runtime-evidence/windows-soak-launch/20260830-183236",
-      "notes": "The four-hour soak is running. Connected Workshop gameplay, rotations, remote mutation matrix, reconnect, resync, and abuse remain unexecuted."
+      "notes": "The baseline four-hour soak is running. The exact stable RC smoke will run after the baseline exits because two concurrent official Windows server instances in one Steam session do not provide a valid certification environment. Connected Workshop gameplay, rotations, remote mutation matrix, reconnect, resync, and abuse remain unexecuted."
     },
     {
       "id": "linux-headless-smoke",
       "platform": "linux-wsl2",
       "status": "PASS",
-      "evidence": "docs/validation/2026-08-31-linux-smoke.md",
-      "notes": "Two sequential official Linux starts plus public Workshop download/selection, Steam login, Horus/Mirage load, readiness, hashes, and metrics passed."
+      "evidence": "docs/validation/2026-08-31-linux-smoke.md and docs/validation/2026-08-31-exact-rc-runtime.md",
+      "notes": "Two sequential official Linux starts plus public Workshop download/selection passed. A separate smoke with the stable commit-independent RC DLLs also passed Steam login, Horus/Mirage load, readiness, hashes, metrics, and runtime safeguards."
     },
     {
       "id": "linux-full-runtime",
       "platform": "linux-wsl2",
       "status": "PENDING",
-      "evidence": "/opt/horus/server-linux/runtime-evidence/linux",
-      "notes": "The four-hour soak is running. Connected Workshop gameplay, rotations, remote mutation matrix, reconnect, resync, abuse, and normal-client replication remain unexecuted."
+      "evidence": "/opt/horus/server-linux-workshop/runtime-evidence/linux-stable-rc-soak/20260831-025012",
+      "notes": "The four-hour exact-DLL soak is running. Connected Workshop gameplay, rotations, remote mutation matrix, reconnect, resync, abuse, and normal-client replication remain unexecuted."
     },
     {
       "id": "two-steam-identities",
@@ -51,7 +51,7 @@
       "platform": "packaging",
       "status": "PASS",
       "evidence": "dist/SHA256SUMS.txt and dist/release-manifest.json",
-      "notes": "The clean-tree gate rebuilds all three archives twice, requires byte-identical output, verifies every embedded hash, and binds the manifest to the exact clean commit."
+      "notes": "The clean-tree gate rebuilds all three archives twice, requires byte-identical output, verifies every embedded hash, binds the manifest to the exact clean commit, and proves that release DLLs do not depend on Git revision metadata."
     }
   ]
 }

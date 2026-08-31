@@ -10,6 +10,8 @@ Record only observed results. Use `PASS`, `FAIL`, `PENDING`, or `BLOCKED`; never
 - [x] Server assembly dependency audit passes.
 - [x] UTF-8, English, JSON, PowerShell, Bash, Markdown-link, and version checks pass.
 - [x] Two packaging runs produce identical hashes.
+- [x] Release DLL hashes remain identical across a real commit change and forced revision identifiers.
+- [x] Runtime helpers enforce readiness and log-size safeguards while retaining failure evidence.
 - [x] ZIP contents and embedded `SHA256SUMS` validate.
 - [x] No proprietary or generated DLL/ZIP is tracked by Git.
 
