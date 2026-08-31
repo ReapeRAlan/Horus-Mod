@@ -186,7 +186,12 @@ try {
         & (Join-Path $repoRoot 'build/verify-server-assembly.ps1') -ServerAssembly (Join-Path $repoRoot "bin/$Configuration/net472/Horus.Server.dll")
 
         Write-Step 'Proving assemblies are independent of the source commit identifier'
-        $revisionHashes = @()
+        $revisionHashes = @([pscustomobject]@{
+            Revision = 'project-default'
+            Shared = (Get-FileHash -LiteralPath (Join-Path $repoRoot "bin/$Configuration/netstandard2.0/Horus.Shared.dll") -Algorithm SHA256).Hash
+            Server = (Get-FileHash -LiteralPath (Join-Path $repoRoot "bin/$Configuration/net472/Horus.Server.dll") -Algorithm SHA256).Hash
+            Client = (Get-FileHash -LiteralPath (Join-Path $repoRoot "bin/$Configuration/net472/Horus.Client.dll") -Algorithm SHA256).Hash
+        })
         foreach ($revision in @('1111111111111111111111111111111111111111', '2222222222222222222222222222222222222222')) {
             Invoke-Checked 'dotnet' @('build', (Join-Path $repoRoot 'Horus.Server.csproj'), '-c', $Configuration, '--nologo', '--no-restore', '-t:Rebuild', '-warnaserror', "-p:SourceRevisionId=$revision", "-p:NuclearOptionDir=$ServerNuclearOptionDir", "-p:NuclearOptionManagedDir=$ServerManagedDir")
             Invoke-Checked 'dotnet' @('build', (Join-Path $repoRoot 'HorusMod.csproj'), '-c', $Configuration, '--nologo', '--no-restore', '-t:Rebuild', '-warnaserror', "-p:SourceRevisionId=$revision", "-p:NuclearOptionDir=$NuclearOptionDir", "-p:NuclearOptionManagedDir=$NuclearOptionManagedDir")
@@ -198,7 +203,7 @@ try {
             }
         }
         foreach ($assembly in @('Shared', 'Server', 'Client')) {
-            if ($revisionHashes[0].$assembly -ne $revisionHashes[1].$assembly) { throw "$assembly assembly embeds or otherwise depends on SourceRevisionId." }
+            if (@($revisionHashes | ForEach-Object { $_.$assembly } | Sort-Object -Unique).Count -ne 1) { throw "$assembly assembly embeds or otherwise depends on SourceRevisionId." }
         }
 
         Write-Step 'Building and comparing deterministic release packages'

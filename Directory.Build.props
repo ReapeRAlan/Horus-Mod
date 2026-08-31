@@ -1,8 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
 <Project>
   <PropertyGroup>
+    <NuclearOptionDir Condition="'$(NuclearOptionDir)' == ''">$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)..'))</NuclearOptionDir>
     <BaseIntermediateOutputPath>obj\$(MSBuildProjectName)\</BaseIntermediateOutputPath>
     <MSBuildProjectExtensionsPath>$(BaseIntermediateOutputPath)</MSBuildProjectExtensionsPath>
     <Deterministic>true</Deterministic>
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+    <!-- The exact Git commit is recorded in release-manifest.json, not embedded in assemblies. -->
+    <SourceRevisionId Condition="'$(SourceRevisionId)' == ''">0000000000000000000000000000000000000000</SourceRevisionId>
   </PropertyGroup>
 </Project>

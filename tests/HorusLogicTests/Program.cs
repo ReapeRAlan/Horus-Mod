@@ -324,12 +324,16 @@ internal static class Program
             linuxRuntimeRunner.Contains("HORUS_MAX_LOG_BYTES:-16777216", StringComparison.Ordinal) &&
             linuxRuntimeRunner.Contains("runtime-status.json", StringComparison.Ordinal));
         string deterministicBuildProps = ReadRepoFile("Directory.Build.props");
-        Check("release projects isolate intermediate restore assets",
+        Check("release projects preserve the default local game root and isolate restore assets",
+            deterministicBuildProps.Contains("<NuclearOptionDir Condition=", StringComparison.Ordinal) &&
+            deterministicBuildProps.Contains("$(MSBuildThisFileDirectory)..", StringComparison.Ordinal) &&
             deterministicBuildProps.Contains("<BaseIntermediateOutputPath>obj\\$(MSBuildProjectName)\\</BaseIntermediateOutputPath>", StringComparison.Ordinal) &&
             deterministicBuildProps.Contains("<MSBuildProjectExtensionsPath>$(BaseIntermediateOutputPath)</MSBuildProjectExtensionsPath>", StringComparison.Ordinal));
         Check("release assemblies do not embed the source commit identifier",
             deterministicBuildProps.Contains("<Deterministic>true</Deterministic>", StringComparison.Ordinal) &&
-            deterministicBuildProps.Contains("<IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>", StringComparison.Ordinal));
+            deterministicBuildProps.Contains("<IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>", StringComparison.Ordinal) &&
+            deterministicBuildProps.Contains("<SourceRevisionId Condition=", StringComparison.Ordinal) &&
+            deterministicBuildProps.Contains("0000000000000000000000000000000000000000", StringComparison.Ordinal));
         string clientFactorySource = ReadRepoFile("src", "Economy", "RtsFactoryManager.cs");
         Check("local factories use authoritative transactions and atomic persistence replacement",
             clientFactorySource.Contains("CreateTransaction(def, factory.factionId)", StringComparison.Ordinal) &&
