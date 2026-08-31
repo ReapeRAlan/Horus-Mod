@@ -29,6 +29,7 @@ namespace HorusMod.Server
     {
         public HorusTokenBucket ConnectionRate;
         public bool HelloReceived;
+        public ushort HelloProtocolVersion;
         public bool Authorized;
         public ulong SteamId;
     }

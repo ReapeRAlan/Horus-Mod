@@ -387,6 +387,12 @@ internal static class Program
         Check("server and client revoke cached authority after live authentication loss",
             serverTransportSource.Contains("SendCurrentCapabilities(pair.Key", StringComparison.Ordinal) &&
             clientTransportSource.Contains("value.Result==HorusResultCode.SteamRequired", StringComparison.Ordinal));
+        string serverStateSource = ReadRepoFile("src", "Server", "HorusServerState.cs");
+        Check("server persists and rechecks the negotiated protocol before granting authority",
+            serverStateSource.Contains("HelloProtocolVersion", StringComparison.Ordinal) &&
+            serverTransportSource.Contains("client.HelloProtocolVersion=hello.ProtocolVersion", StringComparison.Ordinal) &&
+            serverTransportSource.Contains("client.HelloProtocolVersion!=HorusProtocol.Version", StringComparison.Ordinal) &&
+            !serverTransportSource.Contains("pair.Value.HelloReceived=true", StringComparison.Ordinal));
         Check("structured command rejections are written to the audit journal",
             serverTransportSource.Contains("if(command!=null)audit.Write", StringComparison.Ordinal));
         Check("stale state requests recover through a fresh capability session",

@@ -71,7 +71,8 @@ namespace HorusMod.Server
             state.BeginMission();executor.ResetMission();pending.Clear();
             foreach(KeyValuePair<INetworkPlayer,HorusServerClientState> pair in clients.ToArray())
             {
-                ResolveCaller(pair.Key,pair.Value,out HorusResultCode code,out string reason);pair.Value.HelloReceived=true;
+                ResolveCaller(pair.Key,pair.Value,out HorusResultCode code,out string reason);
+                if(!pair.Value.HelloReceived)continue;
                 Send(pair.Key,HorusPacketKind.Capabilities,new HorusCapabilities{ServerVersion=HorusServerPlugin.PluginVersion,SessionId=state.SessionId,Revision=state.Revision,Features=HorusCapability.FullParity,Authorized=pair.Value.Authorized&&enabled(),Result=!enabled()?HorusResultCode.Disabled:code,Message=!enabled()?"Horus server is disabled.":reason});
             }
         }
@@ -120,9 +121,9 @@ namespace HorusMod.Server
         {
             HorusServerClientState client=GetClient(player);
             if(!client.ConnectionRate.TryConsume(Time.realtimeSinceStartupAsDouble))return;
-            ResolveCaller(player,client,out HorusResultCode code,out string reason);
-            if(hello.ProtocolVersion!=HorusProtocol.Version){code=HorusResultCode.ProtocolMismatch;reason="Protocol mismatch.";client.Authorized=false;}
             client.HelloReceived=true;
+            client.HelloProtocolVersion=hello.ProtocolVersion;
+            ResolveCaller(player,client,out HorusResultCode code,out string reason);
             Send(player,HorusPacketKind.Capabilities,new HorusCapabilities
             {
                 ServerVersion=HorusServerPlugin.PluginVersion,SessionId=state.SessionId,Revision=state.Revision,
@@ -232,6 +233,8 @@ namespace HorusMod.Server
         private void ResolveCaller(INetworkPlayer player,HorusServerClientState client,out HorusResultCode code,out string reason)
         {
             client.Authorized=false;client.SteamId=0;
+            if(!client.HelloReceived){code=HorusResultCode.Unauthorized;reason="Hello handshake is required.";return;}
+            if(client.HelloProtocolVersion!=HorusProtocol.Version){code=HorusResultCode.ProtocolMismatch;reason="Protocol mismatch.";return;}
             if(player==null||!player.IsAuthenticated){code=HorusResultCode.Unauthorized;reason="Connection is not authenticated.";return;}
             NetworkAuthenticatorNuclearOption.AuthData auth=player.GetAuthData();
             if(auth==null||!auth.UsingSteamTransport||!auth.SteamSessionOk){code=HorusResultCode.SteamRequired;reason="An active authenticated Steam session is required.";return;}
