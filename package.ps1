@@ -124,7 +124,13 @@ function New-HorusPackage {
         'docs\validation\release-matrix.json',
         'docs\validation\2026-08-30-windows-smoke.md',
         'docs\validation\2026-08-31-linux-smoke.md',
-        'docs\validation\2026-08-31-authentication-audit.md'
+        'docs\validation\2026-08-31-authentication-audit.md',
+        'docs\validation\2026-08-31-exact-rc-runtime.md',
+        'build\runtime\README.md',
+        'build\runtime\install-dedicated-package.ps1',
+        'build\runtime\run-windows-dedicated.ps1',
+        'build\runtime\run-linux-dedicated.sh',
+        'build\runtime\analyze-runtime-logs.ps1'
     )) {
         Copy-PackageFile (Join-Path $repoRoot $document) (Join-Path $stageFull $document)
     }

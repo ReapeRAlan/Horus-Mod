@@ -144,8 +144,27 @@ function Test-PackageArchive {
         foreach ($entry in $entries | Where-Object { $_.FullName.EndsWith('.dll', [StringComparison]::OrdinalIgnoreCase) }) {
             if ($entry.FullName -notin $allowedDlls) { throw "Unexpected dependency in package: $($entry.FullName)" }
         }
-        foreach ($required in @('README.md', 'CHANGELOG.md', 'ROADMAP.md', 'SECURITY.md', 'docs/dedicated-server.md', 'docs/upgrade-from-v1.4.3.md', 'docs/troubleshooting.md', 'docs/releases/v2.0.0-rc.1.md', 'docs/validation/release-checklist.md', 'docs/validation/release-matrix.json', 'docs/validation/2026-08-30-windows-smoke.md', 'docs/validation/2026-08-31-linux-smoke.md', 'docs/validation/2026-08-31-authentication-audit.md', 'SHA256SUMS')) {
+        foreach ($required in @('README.md', 'CHANGELOG.md', 'ROADMAP.md', 'SECURITY.md', 'docs/dedicated-server.md', 'docs/upgrade-from-v1.4.3.md', 'docs/troubleshooting.md', 'docs/releases/v2.0.0-rc.1.md', 'docs/validation/release-checklist.md', 'docs/validation/release-matrix.json', 'docs/validation/2026-08-30-windows-smoke.md', 'docs/validation/2026-08-31-linux-smoke.md', 'docs/validation/2026-08-31-authentication-audit.md', 'docs/validation/2026-08-31-exact-rc-runtime.md', 'build/runtime/README.md', 'build/runtime/install-dedicated-package.ps1', 'build/runtime/run-windows-dedicated.ps1', 'build/runtime/run-linux-dedicated.sh', 'build/runtime/analyze-runtime-logs.ps1', 'SHA256SUMS')) {
             if ($required -notin $entries.FullName) { throw "Missing package entry $required in $ZipPath." }
+        }
+        foreach ($markdownEntry in $entries | Where-Object { $_.FullName.EndsWith('.md', [StringComparison]::OrdinalIgnoreCase) }) {
+            $reader = New-Object System.IO.StreamReader($markdownEntry.Open(), [System.Text.UTF8Encoding]::new($false, $true))
+            try { $markdown = $reader.ReadToEnd() } finally { $reader.Dispose() }
+            foreach ($match in [regex]::Matches($markdown, '\]\((?!https?://|mailto:|#)([^)]+)\)')) {
+                $target = $match.Groups[1].Value.Split('#')[0].Replace('%20', ' ').Replace('\', '/')
+                if ([string]::IsNullOrWhiteSpace($target) -or $target.StartsWith('<')) { continue }
+                $parts = New-Object System.Collections.Generic.List[string]
+                foreach ($part in $markdownEntry.FullName.Split('/') | Select-Object -SkipLast 1) { if ($part) { $parts.Add($part) } }
+                foreach ($part in $target.Split('/')) {
+                    if ([string]::IsNullOrWhiteSpace($part) -or $part -eq '.') { continue }
+                    if ($part -eq '..') {
+                        if ($parts.Count -eq 0) { throw "Packaged Markdown link escapes the archive in $($markdownEntry.FullName): $target" }
+                        $parts.RemoveAt($parts.Count - 1)
+                    } else { $parts.Add($part) }
+                }
+                $resolved = $parts -join '/'
+                if ($resolved -notin $entries.FullName) { throw "Broken packaged Markdown link in $($markdownEntry.FullName): $target" }
+            }
         }
         $manifestEntry = $entries | Where-Object { $_.FullName -eq 'SHA256SUMS' }
         $reader = New-Object System.IO.StreamReader($manifestEntry.Open(), [System.Text.UTF8Encoding]::new($false, $true))
