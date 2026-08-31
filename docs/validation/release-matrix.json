@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "version": "2.0.0-rc.1",
-  "updatedUtc": "2026-08-31T02:06:41Z",
+  "updatedUtc": "2026-08-31T02:07:58Z",
   "statuses": ["PASS", "FAIL", "PENDING", "BLOCKED"],
   "checks": [
     {
@@ -9,7 +9,7 @@
       "platform": "portable",
       "status": "PASS",
       "evidence": "130 pure logic, protocol, security, UTF-8/visible-text, paging, ownership, persistence, strict size-bounded allowlist input, bounded economy/factory/server-config, dormant-authority activation, isolated-config, live-authority revocation, stale-session recovery, complete snapshot/response coherence and retry, factory-visual parity, state, and audit checks",
-      "notes": "The current local logic suite and zero-warning Client/Server builds pass. Final clean-tree gate and GitHub Actions rerun are still required."
+      "notes": "The complete local clean-tree gate passes with 130 checks and zero-warning Client/Server builds. GitHub Actions must rerun after push."
     },
     {
       "id": "windows-headless-smoke",
@@ -49,9 +49,9 @@
     {
       "id": "release-assets",
       "platform": "packaging",
-      "status": "PENDING",
+      "status": "PASS",
       "evidence": "dist/SHA256SUMS.txt and dist/release-manifest.json",
-      "notes": "Package inputs were corrected after the provisional gate detected a missing evidence document. Regenerate from the final clean commit and verify byte-identical output."
+      "notes": "The clean-tree gate rebuilds all three archives twice, requires byte-identical output, verifies every embedded hash, and binds the manifest to the exact clean commit."
     }
   ]
 }
