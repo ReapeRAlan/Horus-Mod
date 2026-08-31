@@ -28,6 +28,13 @@ function Invoke-Checked {
     if ($LASTEXITCODE -ne 0) { throw "$File failed with exit code ${LASTEXITCODE}: $($Arguments -join ' ')" }
 }
 
+function Test-RepositoryClean {
+    Write-Step 'Validating a clean release source tree'
+    $changes = @(& git -c "safe.directory=$repoRoot" status --porcelain --untracked-files=all)
+    if ($LASTEXITCODE -ne 0) { throw 'git status failed.' }
+    if ($changes.Count -gt 0) { throw "Release validation requires a clean source tree:`n$($changes -join "`n")" }
+}
+
 function Get-RepositoryFiles {
     $items = @(& git -c "safe.directory=$repoRoot" ls-files --cached --others --exclude-standard)
     if ($LASTEXITCODE -ne 0) { throw 'git ls-files failed.' }
@@ -75,6 +82,8 @@ function Test-JsonAndConfig {
     if ($dedicated.ModdedServer -ne $true) { throw 'DedicatedServerConfig.example.json must set ModdedServer=true.' }
     $serverConfig = Get-Content -LiteralPath (Join-Path $repoRoot 'docs/config/Horus.Server.cfg') -Raw -Encoding UTF8
     if ($serverConfig -notmatch '(?m)^Enabled\s*=\s*false\s*$') { throw 'Horus.Server.cfg must fail closed with Enabled=false.' }
+    if ($serverConfig -notmatch '(?m)^AllowMissionUnitDelete\s*=\s*false\s*$') { throw 'Horus.Server.cfg must protect mission-unit deletion by default.' }
+    if ($serverConfig -notmatch '(?m)^AllowMissionUnitMutation\s*=\s*false\s*$') { throw 'Horus.Server.cfg must protect mission-unit mutation by default.' }
     $allowlist = Get-Content -LiteralPath (Join-Path $repoRoot 'docs/config/HorusMod/dedicated_admins.txt') -Encoding UTF8
     if ($allowlist | Where-Object { $_ -match '^\s*\d{17}\s*$' }) { throw 'The packaged administrator allowlist must be empty.' }
 }
@@ -135,7 +144,7 @@ function Test-PackageArchive {
         foreach ($entry in $entries | Where-Object { $_.FullName.EndsWith('.dll', [StringComparison]::OrdinalIgnoreCase) }) {
             if ($entry.FullName -notin $allowedDlls) { throw "Unexpected dependency in package: $($entry.FullName)" }
         }
-        foreach ($required in @('README.md', 'CHANGELOG.md', 'ROADMAP.md', 'SECURITY.md', 'docs/dedicated-server.md', 'docs/upgrade-from-v1.4.3.md', 'docs/troubleshooting.md', 'docs/releases/v2.0.0-rc.1.md', 'docs/validation/release-checklist.md', 'docs/validation/release-matrix.json', 'docs/validation/2026-08-30-windows-smoke.md', 'docs/validation/2026-08-31-linux-smoke.md', 'SHA256SUMS')) {
+        foreach ($required in @('README.md', 'CHANGELOG.md', 'ROADMAP.md', 'SECURITY.md', 'docs/dedicated-server.md', 'docs/upgrade-from-v1.4.3.md', 'docs/troubleshooting.md', 'docs/releases/v2.0.0-rc.1.md', 'docs/validation/release-checklist.md', 'docs/validation/release-matrix.json', 'docs/validation/2026-08-30-windows-smoke.md', 'docs/validation/2026-08-31-linux-smoke.md', 'docs/validation/2026-08-31-authentication-audit.md', 'SHA256SUMS')) {
             if ($required -notin $entries.FullName) { throw "Missing package entry $required in $ZipPath." }
         }
         $manifestEntry = $entries | Where-Object { $_.FullName -eq 'SHA256SUMS' }
@@ -158,6 +167,7 @@ function Test-PackageArchive {
 
 Push-Location $repoRoot
 try {
+    Test-RepositoryClean
     Test-TextAndLanguage
     Test-JsonAndConfig
     Test-MarkdownLinks
@@ -186,6 +196,10 @@ try {
             if ((Get-FileHash -LiteralPath $first -Algorithm SHA256).Hash -ne (Get-FileHash -LiteralPath $second -Algorithm SHA256).Hash) { throw "Non-deterministic artifact: $name" }
         }
         foreach ($zip in Get-ChildItem -LiteralPath $OutputDirectory -Filter "Horus-*-v$version.zip") { Test-PackageArchive $zip.FullName }
+        $manifest = Get-Content -LiteralPath (Join-Path $OutputDirectory 'release-manifest.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+        $sourceCommit = (& git -c "safe.directory=$repoRoot" rev-parse HEAD).Trim()
+        if ($manifest.sourceTreeDirty -ne $false) { throw 'Release manifest reports a dirty source tree.' }
+        if ($manifest.sourceCommit -ne $sourceCommit) { throw "Release manifest source commit '$($manifest.sourceCommit)' does not match '$sourceCommit'." }
     }
 
     Write-Step 'Checking repository whitespace'

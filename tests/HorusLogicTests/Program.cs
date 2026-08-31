@@ -128,8 +128,11 @@ internal static class Program
         Check("dedicated command validator rejects out-of-world coordinates", !HorusCommandValidator.TryValidate(decoded, out _));
 
         var allowlist = HorusAdminAllowlist.Parse(new[] { "# admins", "76561198000000001 # gm", "bad", "76561198000000001" }, out var errors);
-        Check("Steam allowlist is exact, deduplicated, and reports invalid lines",
-            allowlist.Count == 1 && allowlist.Contains(76561198000000001UL) && !allowlist.Contains(76561198000000002UL) && errors.Count == 1);
+        Check("Steam allowlist fails closed when any line is invalid",
+            allowlist.Count == 0 && errors.Count == 1);
+        var validAllowlist = HorusAdminAllowlist.Parse(new[] { "76561198000000001", "76561198000000001" }, out var validErrors);
+        Check("Steam allowlist is exact and deduplicated when the complete file is valid",
+            validAllowlist.Count == 1 && validAllowlist.Contains(76561198000000001UL) && !validAllowlist.Contains(76561198000000002UL) && validErrors.Count == 0);
 
         var dedup = new HorusRequestDeduplicator(4, 10d);
         Guid request = Guid.NewGuid();
@@ -160,19 +163,30 @@ internal static class Program
         Check("hello codec round-trips", hello.ProtocolVersion == HorusProtocol.Version && hello.ClientVersion == "2.0.0-rc.1");
         var capabilities = RoundTrip<HorusCapabilities>(HorusPacketKind.Capabilities, new HorusCapabilities { ServerVersion = "2.0.0-rc.1", SessionId = state.SessionId, Revision = 7, Features = HorusCapability.FullParity, Authorized = true, Result = HorusResultCode.Accepted, Message = "ok" });
         Check("capabilities codec round-trips", capabilities.Authorized && capabilities.SessionId == state.SessionId && capabilities.Features == HorusCapability.FullParity);
+        Check("capabilities response policy accepts the current bounded contract", HorusResponsePolicy.IsValidCapabilities(capabilities));
         var result = new HorusCommandResult { RequestId = command.RequestId, Command = command.Command, Result = HorusResultCode.Accepted, SessionId = command.SessionId, Revision = 13, Message = "accepted" };result.AffectedUnitIds.Add(17);
         var decodedResult = RoundTrip<HorusCommandResult>(HorusPacketKind.CommandResult, result);
         Check("command result codec round-trips", decodedResult.Result == HorusResultCode.Accepted && decodedResult.AffectedUnitIds.Count == 1);
+        Check("command result response policy accepts unique nonzero affected ids", HorusResponsePolicy.IsValidResult(decodedResult));
         var requestState = RoundTrip<HorusStateRequest>(HorusPacketKind.StateRequest, new HorusStateRequest { SessionId = state.SessionId, KnownRevision = 44 });
         Check("state request codec round-trips", requestState.SessionId == state.SessionId && requestState.KnownRevision == 44);
         var stateEvent = RoundTrip<HorusStateEvent>(HorusPacketKind.StateEvent, new HorusStateEvent { SessionId = state.SessionId, Revision = 45, Result = result });
         Check("state event codec round-trips", stateEvent.Revision == 45 && stateEvent.Result.RequestId == command.RequestId);
+        Check("state event policy rejects mismatched nested session and revision", !HorusResponsePolicy.IsValidEvent(stateEvent));
+        var validEventResult = new HorusCommandResult { RequestId = Guid.NewGuid(), Command = HorusCommandKind.Move, Result = HorusResultCode.Accepted, SessionId = state.SessionId, Revision = 45, Message = "accepted" };
+        Check("state event policy accepts coherent nested results", HorusResponsePolicy.IsValidEvent(new HorusStateEvent { SessionId = state.SessionId, Revision = 45, Result = validEventResult }));
 
         var oversizedString = new HorusHello { ClientVersion = new string('x', HorusProtocol.MaxStringBytes + 1) };
         Check("codec rejects oversized strings", Throws<InvalidDataException>(() => HorusWireCodec.Encode(HorusPacketKind.Hello, oversizedString)));
         var oversizedPacket = new HorusCommandEnvelope { SessionId = Guid.NewGuid(), RequestId = Guid.NewGuid(), Command = HorusCommandKind.SetLoadout };
         for (int i = 0; i < HorusProtocol.MaxMounts; i++) oversizedPacket.Payload.MountKeys.Add(new string('x', HorusProtocol.MaxStringBytes));
-        Check("codec enforces the 16 KiB message limit", Throws<InvalidDataException>(() => HorusWireCodec.Encode(HorusPacketKind.Command, oversizedPacket)));
+        Check("codec enforces the aggregate string-list limit", Throws<InvalidDataException>(() => HorusWireCodec.Encode(HorusPacketKind.Command, oversizedPacket)));
+        var maximumPacket = new HorusStatePage { SessionId = Guid.NewGuid(), SnapshotId = Guid.NewGuid(), PageIndex = 0, PageCount = 1 };
+        for (uint i = 0; i < HorusProtocol.MaxSnapshotUnitsPerPage; i++) maximumPacket.Units.Add(new HorusUnitState { UnitId = i + 1, DefinitionKey = new string('d', HorusProtocol.MaxStringBytes), Name = new string('n', HorusProtocol.MaxStringBytes) });
+        var maximumFactory = new HorusFactoryState { FactoryId = new string('f', HorusProtocol.MaxStringBytes), PresetName = new string('p', HorusProtocol.MaxStringBytes), LastStatus = new string('s', HorusProtocol.MaxStringBytes) };
+        for (int i = 0; i < 16; i++) maximumFactory.ProductionKeys.Add(new string('k', HorusProtocol.MaxStringBytes));
+        maximumPacket.Factories.Add(maximumFactory);
+        Check("codec independently enforces the 16 KiB packet limit", Throws<InvalidDataException>(() => HorusWireCodec.Encode(HorusPacketKind.StatePage, maximumPacket)));
         Check("decoder rejects trailing data", Throws<InvalidDataException>(() => HorusWireCodec.Decode(AppendByte(encoded), out _)));
 
         Check("decoder rejects null packets", Throws<InvalidDataException>(() => HorusWireCodec.Decode(null, out _)));
@@ -186,6 +200,8 @@ internal static class Program
 
         var emptyRequest = new HorusCommandEnvelope { Command = HorusCommandKind.Move };
         Check("validator rejects an empty request id", !HorusCommandValidator.TryValidate(emptyRequest, out _));
+        var duplicateIds = new HorusCommandEnvelope { RequestId = Guid.NewGuid(), Command = HorusCommandKind.Move };duplicateIds.Payload.UnitIds.Add(7);duplicateIds.Payload.UnitIds.Add(7);
+        Check("validator rejects duplicate or replayed unit identities inside one command", !HorusCommandValidator.TryValidate(duplicateIds, out _));
         var controlText = new HorusCommandEnvelope { RequestId = Guid.NewGuid(), Command = HorusCommandKind.Spawn };
         controlText.Payload.DefinitionKey = "AIR\nCRAFT";
         Check("validator rejects control characters in stable keys", !HorusCommandValidator.TryValidate(controlText, out _));
@@ -203,10 +219,20 @@ internal static class Program
         maxWaypoints.Payload.Points.Add(new HorusVector3(0, 0, 0));
         Check("codec rejects waypoint lists above the limit", Throws<InvalidDataException>(() => HorusWireCodec.Encode(HorusPacketKind.Command, maxWaypoints)));
 
+        var oversizedKey = new HorusCommandEnvelope { RequestId = Guid.NewGuid(), Command = HorusCommandKind.Spawn };
+        oversizedKey.Payload.DefinitionKey = new string('x', HorusProtocol.MaxStringBytes + 1);
+        Check("validator rejects stable keys above their UTF-8 byte limit", !HorusCommandValidator.TryValidate(oversizedKey, out _));
+        var oversizedMountBytes = new HorusCommandEnvelope { RequestId = Guid.NewGuid(), Command = HorusCommandKind.SetLoadout };
+        for (int i = 0; i < 17; i++) oversizedMountBytes.Payload.MountKeys.Add(new string('m', HorusProtocol.MaxStringBytes));
+        Check("validator rejects oversized aggregate mount bytes", !HorusCommandValidator.TryValidate(oversizedMountBytes, out _));
+        Check("UTF-8 clamping never splits a multibyte character", HorusWireText.Clamp("éé", 3) == "é");
+        Check("strict wire text rejects an unpaired surrogate", !HorusWireText.IsValid("\ud800"));
+        Check("visible wire text removes control characters before display", HorusWireText.SanitizeVisible("line\nvalue") == "line value");
+
         Check("SteamID64 format accepts an individual account", HorusAdminAllowlist.IsIndividualSteamId64(76561198000000001UL));
         Check("SteamID64 format rejects arbitrary integers", !HorusAdminAllowlist.IsIndividualSteamId64(123UL));
         var strictAllowlist = HorusAdminAllowlist.Parse(new[] { "123", "0", "76561198000000001" }, out var strictErrors);
-        Check("allowlist fails closed for non-individual identifiers", strictAllowlist.Count == 1 && strictErrors.Count == 2);
+        Check("allowlist fails closed for non-individual identifiers", strictAllowlist.Count == 0 && strictErrors.Count == 2);
 
         var boundedDedup = new HorusRequestDeduplicator(2, 60d);
         Guid first = Guid.NewGuid(); Guid second = Guid.NewGuid(); Guid third = Guid.NewGuid();
@@ -216,6 +242,82 @@ internal static class Program
         Check("snapshot paging always emits one page", HorusPaging.ComputePageCount(0, 0, 8) == 1);
         Check("snapshot paging covers unequal collections", HorusPaging.ComputePageCount(17, 9, 8) == 3);
         Check("snapshot paging rejects invalid counts", Throws<ArgumentOutOfRangeException>(() => HorusPaging.ComputePageCount(-1, 0, 8)));
+        state.RtsMode = 0;state.RtsDeployMode = 0;
+        Check("snapshot policy accepts a bounded page", HorusSnapshotPolicy.IsValidPageShape(state));
+        Check("snapshot policy accepts a complete coherent snapshot", HorusSnapshotPolicy.IsCoherentSnapshot(new[] { state }));
+        state.Units.Add(new HorusUnitState { UnitId = 3, DefinitionKey = "AIRCRAFT_2", Name = "Duplicate", Position = new HorusVector3(1, 2, 3) });
+        Check("snapshot policy rejects duplicate stable identities", !HorusSnapshotPolicy.IsCoherentSnapshot(new[] { state }));
+        state.Units.RemoveAt(state.Units.Count - 1);
+        var invalidPage = new HorusStatePage { SessionId = Guid.NewGuid(), SnapshotId = Guid.NewGuid(), PageIndex = 0, PageCount = HorusProtocol.MaxSnapshotPages + 1 };
+        Check("snapshot policy rejects excessive page counts", !HorusSnapshotPolicy.IsValidPageShape(invalidPage));
+        Check("snapshot codec rejects excessive page counts", Throws<InvalidDataException>(() => HorusWireCodec.Encode(HorusPacketKind.StatePage, invalidPage)));
+        var tooManyUnitsPage = new HorusStatePage { SessionId = Guid.NewGuid(), SnapshotId = Guid.NewGuid(), PageIndex = 0, PageCount = 1 };
+        for (uint i = 0; i <= HorusProtocol.MaxSnapshotUnitsPerPage; i++) tooManyUnitsPage.Units.Add(new HorusUnitState { UnitId = i + 1 });
+        Check("snapshot codec rejects excessive per-page units", Throws<InvalidDataException>(() => HorusWireCodec.Encode(HorusPacketKind.StatePage, tooManyUnitsPage)));
+
+        Check("ownership policy protects original mission units by default", !HorusOwnershipPolicy.CanMutate(false, false));
+        Check("ownership policy permits Horus-owned or explicitly enabled units", HorusOwnershipPolicy.CanMutate(true, false) && HorusOwnershipPolicy.CanMutate(false, true));
+        Check("persistence policy rejects non-finite positions", !HorusPersistencePolicy.IsSafePosition(float.NaN, 0f, 0f));
+        Check("persistence policy accepts bounded queue keys", HorusPersistencePolicy.IsSafeStringCollection(new[] { "AIRCRAFT_A", "AIRCRAFT_B" }, HorusProtocol.MaxEntitiesPerCommand, out int persistedBytes) && persistedBytes > 0);
+        var persistedOversize = new List<string>();for(int i=0;i<17;i++)persistedOversize.Add(new string('q',HorusProtocol.MaxStringBytes));
+        Check("persistence policy rejects oversized queue bytes", !HorusPersistencePolicy.IsSafeStringCollection(persistedOversize, HorusProtocol.MaxEntitiesPerCommand, out _));
+
+        Check("economy policy rejects non-finite and out-of-range budgets",
+            !HorusEconomyPolicy.IsValidBudget(float.NaN) && !HorusEconomyPolicy.IsValidBudget(float.PositiveInfinity) &&
+            !HorusEconomyPolicy.IsValidBudget(-1f) && !HorusEconomyPolicy.IsValidBudget(HorusEconomyPolicy.MaxBudget + 128f));
+        Check("economy policy rejects negative and non-finite income",
+            !HorusEconomyPolicy.IsValidIncome(-1f) && !HorusEconomyPolicy.IsValidIncome(float.NegativeInfinity));
+        Check("economy policy bounds multipliers and tick intervals",
+            HorusEconomyPolicy.IsValidMultiplier(1f) && !HorusEconomyPolicy.IsValidMultiplier(float.NaN) &&
+            HorusEconomyPolicy.IsValidTickSeconds(5f) && !HorusEconomyPolicy.IsValidTickSeconds(HorusEconomyPolicy.MaxIncomeTickSeconds + 1f));
+        Check("economy policy rejects invalid unit costs",
+            !HorusEconomyPolicy.IsValidUnitCost(float.NaN) && !HorusEconomyPolicy.IsValidUnitCost(-0.01f));
+        Check("economy budget addition preserves a finite authoritative result",
+            HorusEconomyPolicy.TryAddBudget(100f, 25f, out float safeBudget) && safeBudget == 125f);
+        Check("economy budget addition rejects overflow and overdraft",
+            !HorusEconomyPolicy.TryAddBudget(HorusEconomyPolicy.MaxBudget, 1f, out _) &&
+            !HorusEconomyPolicy.TryAddBudget(10f, -11f, out _));
+        Check("economy cost aggregation preserves a finite authoritative result",
+            HorusEconomyPolicy.TryAddUnitCost(100f, 50f, out float safeCost) && safeCost == 150f);
+        Check("economy cost aggregation rejects overflow",
+            !HorusEconomyPolicy.TryAddUnitCost(HorusEconomyPolicy.MaxUnitCost, 1f, out _));
+        string economySource = ReadRepoFile("src", "Economy", "RtsEconomyManager.cs");
+        Check("RTS economy bounds config input and re-resolves committed native unit costs",
+            economySource.Contains("HorusEconomyPolicy.MaxConfigFileBytes", StringComparison.Ordinal) &&
+            economySource.Contains("GetUnitCost(spawnedUnit.definition)", StringComparison.Ordinal) &&
+            economySource.Contains("HorusEconomyPolicy.TryAddBudget", StringComparison.Ordinal) &&
+            economySource.Contains("UnitMatchesFaction", StringComparison.Ordinal));
+        Check("factory policy bounds per-faction and preset counts",
+            HorusFactoryPolicy.IsValidFactoryLimit(10) && !HorusFactoryPolicy.IsValidFactoryLimit(0) &&
+            !HorusFactoryPolicy.IsValidFactoryLimit(HorusFactoryPolicy.MaxFactoriesPerFaction + 1));
+        Check("factory policy rejects non-finite and negative income",
+            !HorusFactoryPolicy.IsValidIncome(float.NaN) && !HorusFactoryPolicy.IsValidIncome(-1f));
+        Check("factory production requires a bounded interval and active-unit limit",
+            HorusFactoryPolicy.IsValidProduction(90f, 10, true) && !HorusFactoryPolicy.IsValidProduction(0f, 10, true) &&
+            !HorusFactoryPolicy.IsValidProduction(90f, 0, true) && HorusFactoryPolicy.IsValidProduction(0f, 0, false));
+        Check("factory runtime policy rejects non-finite timers and coordinates",
+            !HorusFactoryPolicy.IsValidRuntimeNumbers(0f, 100f, 90f, float.PositiveInfinity, 10, 50f, true));
+        string dedicatedFactorySource = ReadRepoFile("src", "Server", "HeadlessRtsFactoryManager.cs");
+        string dedicatedPluginSource = ReadRepoFile("src", "Server", "HorusServerPlugin.cs");
+        Check("dedicated factory config is isolated and bounded",
+            dedicatedFactorySource.Contains("rts_factories_server_config.json", StringComparison.Ordinal) &&
+            dedicatedFactorySource.Contains("ValidateFactoryConfig", StringComparison.Ordinal) &&
+            dedicatedFactorySource.Contains("MaxConfigFileBytes", StringComparison.Ordinal));
+        Check("server runtime remains dormant without native authority",
+            dedicatedPluginSource.Contains("loaded dormant", StringComparison.Ordinal) &&
+            dedicatedPluginSource.Contains("if(!shouldRun){if(runtimeActive)DeactivateRuntime();return;}", StringComparison.Ordinal));
+        Check("server configuration normalizes non-finite placement and bounded retention values",
+            dedicatedPluginSource.Contains("NormalizeBoundedConfiguration", StringComparison.Ordinal) &&
+            dedicatedPluginSource.Contains("!HorusPersistencePolicy.IsFinite(radius)", StringComparison.Ordinal) &&
+            dedicatedPluginSource.Contains("auditRetentionEntry.Value<1||auditRetentionEntry.Value>365", StringComparison.Ordinal));
+        Check("server allowlist input is strict UTF-8 and size bounded",
+            dedicatedPluginSource.Contains("new UTF8Encoding(false,true)", StringComparison.Ordinal) &&
+            dedicatedPluginSource.Contains("Allowlist file is oversized", StringComparison.Ordinal));
+        string clientFactorySource = ReadRepoFile("src", "Economy", "RtsFactoryManager.cs");
+        Check("local factories use authoritative transactions and atomic persistence replacement",
+            clientFactorySource.Contains("CreateTransaction(def, factory.factionId)", StringComparison.Ordinal) &&
+            clientFactorySource.Contains("CommitTransaction(transaction, spawned)", StringComparison.Ordinal) &&
+            clientFactorySource.Contains("current state was preserved", StringComparison.Ordinal));
 
         var serverState = new HorusServerState();
         Guid initialSession = serverState.SessionId;
@@ -240,6 +342,37 @@ internal static class Program
         DateTime now = new DateTime(2026, 8, 30, 0, 0, 0, DateTimeKind.Utc);
         Check("audit retention deletes records older than the policy", HorusAuditFormatter.ShouldDeleteAuditFile(now.AddDays(-15), now, 14));
         Check("audit retention keeps records on the boundary", !HorusAuditFormatter.ShouldDeleteAuditFile(now.AddDays(-14), now, 14));
+
+        string serverTransportSource = ReadRepoFile("src", "Server", "HorusServerTransport.cs");
+        string clientTransportSource = ReadRepoFile("src", "Client", "HorusClientTransport.cs");
+        Check("server rate limiting and deduplication are keyed by authenticated Steam principal",
+            serverTransportSource.Contains("GetPrincipal(client.SteamId", StringComparison.Ordinal) &&
+            serverTransportSource.Contains("principal.Deduplicator", StringComparison.Ordinal));
+        Check("server authority requires the native Steam session to remain valid",
+            serverTransportSource.Contains("!auth.SteamSessionOk", StringComparison.Ordinal));
+        Check("server and client revoke cached authority after live authentication loss",
+            serverTransportSource.Contains("SendCurrentCapabilities(pair.Key", StringComparison.Ordinal) &&
+            clientTransportSource.Contains("value.Result==HorusResultCode.SteamRequired", StringComparison.Ordinal));
+        Check("structured command rejections are written to the audit journal",
+            serverTransportSource.Contains("if(command!=null)audit.Write", StringComparison.Ordinal));
+        Check("stale state requests recover through a fresh capability session",
+            serverTransportSource.Contains("request.SessionId!=state.SessionId", StringComparison.Ordinal) &&
+            serverTransportSource.Contains("Mission session refreshed.", StringComparison.Ordinal));
+        string serverPluginSource = ReadRepoFile("src", "Server", "HorusServerPlugin.cs");
+        Check("dedicated safety exposes a separate original-unit mutation policy",
+            serverPluginSource.Contains("AllowMissionUnitMutation", StringComparison.Ordinal));
+        string ordnancePatchSource = ReadRepoFile("src", "Server", "HorusServerOrdnancePatches.cs");
+        Check("dedicated gameplay patches preserve native behavior while Horus is disabled",
+            ordnancePatchSource.Contains("IsRuntimeEnabled)return true", StringComparison.Ordinal));
+        Check("snapshot requests coalesce and recover after a dropped rate-limited response",
+            clientTransportSource.Contains("snapshotNeeded=true", StringComparison.Ordinal) &&
+            clientTransportSource.Contains("now-snapshotRequestSentTime<5f", StringComparison.Ordinal) &&
+            clientTransportSource.Contains("nextSnapshotRequestTime=now+0.55f", StringComparison.Ordinal));
+        string headlessFactorySource = ReadRepoFile("src", "Server", "HeadlessRtsFactoryManager.cs");
+        Check("headless factories replicate and remove validated native visual anchors",
+            headlessFactorySource.Contains("SpawnFactoryVisual", StringComparison.Ordinal) &&
+            headlessFactorySource.Contains("NetworkServer.Destroy", StringComparison.Ordinal) &&
+            headlessFactorySource.Contains("UnitProduced?.Invoke(anchor)", StringComparison.Ordinal));
     }
 
     private static T RoundTrip<T>(HorusPacketKind kind, object value) => (T)HorusWireCodec.Decode(HorusWireCodec.Encode(kind, value), out _);

@@ -123,7 +123,8 @@ function New-HorusPackage {
         'docs\validation\release-checklist.md',
         'docs\validation\release-matrix.json',
         'docs\validation\2026-08-30-windows-smoke.md',
-        'docs\validation\2026-08-31-linux-smoke.md'
+        'docs\validation\2026-08-31-linux-smoke.md',
+        'docs\validation\2026-08-31-authentication-audit.md'
     )) {
         Copy-PackageFile (Join-Path $repoRoot $document) (Join-Path $stageFull $document)
     }
